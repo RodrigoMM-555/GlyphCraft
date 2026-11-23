@@ -92,7 +92,7 @@ export class VistaGrimorio extends HTMLElement {
           <ol class="glyph-list"></ol>
           <p class="book__hint">Usa <kbd>←</kbd> <kbd>→</kbd> para pasar las páginas.</p>
         </section>
-        <section class="book__page book__page--right glyph-page" aria-live="polite"></section>
+        <section class="book__page book__page--right glyph-page" aria-label="Página del glifo"></section>
       </div>`;
 
     const list = /** @type {HTMLElement} */ (this.querySelector('.glyph-list'));

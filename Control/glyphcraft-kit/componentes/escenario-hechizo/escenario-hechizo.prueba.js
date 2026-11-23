@@ -18,8 +18,10 @@ afterEach(() => {
 });
 
 describe('registro de hechizos', () => {
-  it('incluye los seis elementos', () => {
-    expect(spellIds()).toEqual(expect.arrayContaining(['fire', 'water', 'wind', 'light', 'aegis', 'ice']));
+  it('incluye los nueve elementos, los hechizos combinados y la fusión', () => {
+    expect(spellIds()).toEqual(
+      expect.arrayContaining(['fire', 'water', 'wind', 'light', 'aegis', 'ice', 'lightning', 'earth', 'shadow', 'tormenta-ignea', 'eclipse', 'fusion']),
+    );
     expect(getSpell('fire')?.label).toBe('Fuego');
     expect(getSpell('nada')).toBeNull();
   });
@@ -70,6 +72,7 @@ describe('<gc-spell-stage>', () => {
     expect(() => stage.cast('meteoro')).toThrow(RangeError);
     expect(() => stage.cast('fire', { radius: -1 })).toThrow(TypeError);
     expect(() => stage.cast('fire', { x: Number.NaN })).toThrow(TypeError);
+    expect(() => stage.cast('fire', { power: Number.NaN })).toThrow(TypeError);
   });
 
   it('lanza un hechizo: eventos, estadísticas y promesa', async () => {
@@ -99,17 +102,23 @@ describe('<gc-spell-stage>', () => {
     expect(stage.stats.effects).toBe(0);
   }, 10000);
 
-  it('los seis hechizos se dibujan sin errores de shader', async () => {
+  it('todos los hechizos (elementos y combinados) se dibujan sin errores de shader', async () => {
     const errors = vi.spyOn(console, 'error');
+    const warnings = vi.spyOn(console, 'warn');
     const stage = await mount('quality="low"');
-    for (const spell of ['fire', 'water', 'wind', 'light', 'aegis', 'ice']) {
-      stage.cast(spell, { x: 0.5, y: 0.5, radius: 0.35, intensity: 0.8, stability: 0.6 });
+    const all = spellIds();
+    // Por tandas, para no acumular demasiados efectos a la vez.
+    for (let i = 0; i < all.length; i += 8) {
+      for (const spell of all.slice(i, i + 8)) {
+        stage.cast(spell, { x: 0.5, y: 0.5, radius: 0.35, intensity: 0.8, stability: 0.6, power: 1.5 });
+      }
+      await wait(1500); // tras la activación ya están los efectos de cada hechizo
+      expect(stage.stats.effects).toBeGreaterThanOrEqual(Math.min(8, all.length - i));
+      stage.clear();
     }
-    await wait(1800); // tras la activación ya están los efectos de cada elemento
-    expect(stage.stats.effects).toBeGreaterThanOrEqual(6);
     expect(errors).not.toHaveBeenCalled();
-    stage.clear();
-  }, 10000);
+    expect(warnings.mock.calls.filter((c) => String(c[0]).includes('THREE'))).toEqual([]);
+  }, 20000);
 
   it('combina varios hechizos con una sola activación', async () => {
     const stage = await mount('quality="low"');

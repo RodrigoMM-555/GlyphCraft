@@ -27,7 +27,7 @@ describe('detectElements', () => {
   });
 
   for (const [name, [a, b]] of Object.entries(LAYOUTS)) {
-    it(`reconoce las 15 parejas: ${name}`, () => {
+    it(`reconoce todas las parejas: ${name}`, () => {
       for (let i = 0; i < glyphs.length; i++) {
         for (let j = i + 1; j < glyphs.length; j++) {
           const strokes = [

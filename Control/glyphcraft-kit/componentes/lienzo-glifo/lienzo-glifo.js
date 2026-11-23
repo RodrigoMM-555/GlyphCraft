@@ -2,6 +2,8 @@ import { defineElement } from '../../interno/definir.js';
 import { css, baseStyles } from '../../interno/estilos.js';
 import { emit, readEnum, readNumber } from '../../interno/atributos.js';
 import { ControladorTamano } from '../../controladores/controlador-tamano.js';
+import { correctStroke } from '../../nucleo/geometria/correccion.js';
+import { resample } from '../../nucleo/geometria/trazo.js';
 
 /** @typedef {'hand' | 'pointer' | 'program'} StrokeSource */
 /** @typedef {{ x: number, y: number, t: number }} StrokePoint */
@@ -9,7 +11,9 @@ import { ControladorTamano } from '../../controladores/controlador-tamano.js';
  * @typedef {object} Stroke
  * @property {StrokePoint[]} points Puntos normalizados (0-1) con instante en ms.
  * @property {StrokeSource} source Origen del trazo.
+ * @property {import('../../nucleo/geometria/correccion.js').ShapeKind} [shape] Figura detectada si se corrigió.
  */
+/** @typedef {Stroke & { morph?: { from: { x: number, y: number }[], start: number } }} InternalStroke */
 
 /** Distancia mínima entre puntos consecutivos (reduce ruido y memoria). */
 const MIN_POINT_DISTANCE = 0.0025;
@@ -18,6 +22,12 @@ const MIN_STROKE_LENGTH = 0.02;
 const DEFAULT_INK = '#e8c675';
 /** Colores de la corrección por trazo. */
 const FEEDBACK_COLORS = { good: '#7fe0b5', fair: '#f2c36b', poor: '#ff6b7d' };
+/** Duración del desvanecimiento de los trazos borrados con `eraseInside` (ms). */
+const ERASE_FADE_MS = 380;
+/** Duración de la transformación del trazo en su figura corregida (ms). */
+const MORPH_MS = 320;
+/** Puntos del trazo corregido. */
+const CORRECTED_SAMPLES = 96;
 /** Opacidad de la guía según su estilo. */
 const GUIDE_ALPHA = { ghost: 0.22, faint: 0.09, none: 0 };
 
@@ -59,9 +69,14 @@ const styles = css`
  * @attr {boolean} readonly - Impide añadir trazos.
  * @attr {'ghost' | 'faint' | 'none'} guide-style - Visibilidad de la guía. Por defecto `ghost`.
  * @attr {boolean} guide-next - Resalta en la guía el siguiente trazo que toca dibujar.
+ * @attr {boolean} auto-correct - Al terminar cada trazo (de la mano o del puntero), lo convierte en la figura
+ *   que se quería hacer —círculo, línea, polígono regular, estrella, onda, espiral…— con una breve animación.
+ * @attr {number} correction - Intensidad de la corrección (0-1): 1 = la figura perfecta, 0,5 = a medio camino. Por defecto `1`.
  *
  * @prop {{ x: number, y: number }[][] | null} guide - (Diseño) Trazos modelo que se muestran como guía.
  * @prop {StrokeGrade[]} feedback - (Ejecución) Corrección por trazo: colorea cada trazo. Se borra al cambiar los trazos.
+ * @prop {import('../../nucleo/geometria/correccion.js').SymbolTemplate[]} templates - (Diseño) Símbolos a los que se ajustan los
+ *   trazos con `auto-correct` (ver `templatesFromGlyphs`): una luna mal hecha se vuelve la luna exacta del glifo.
  *
  * @prop {Stroke[]} strokes - (Solo lectura) Copia de los trazos terminados.
  * @prop {number} strokeCount - (Solo lectura) Número de trazos terminados.
@@ -69,7 +84,9 @@ const styles = css`
  *
  * @fires {CustomEvent<{point: StrokePoint, source: StrokeSource}>} drawing-started - Empieza un trazo.
  * @fires {CustomEvent<{stroke: Stroke | null, accepted: boolean, index: number}>} drawing-ended - Termina un trazo (rechazado si es demasiado corto).
+ * @fires {CustomEvent<{index: number, shape: string}>} stroke-corrected - Un trazo se ha convertido en su figura ideal (`auto-correct`).
  * @fires {CustomEvent<{count: number}>} strokes-changed - Cambia el número de trazos.
+ * @fires {CustomEvent<{count: number, indices: number[]}>} strokes-erased - Se han borrado los trazos que había bajo una zona (`eraseInside`).
  * @fires {CustomEvent<{count: number}>} glyph-clearing - Va a borrarse todo. **Cancelable** con `preventDefault()`.
  * @fires {CustomEvent<{count: number}>} glyph-cleared - Se ha borrado todo.
  *
@@ -77,7 +94,7 @@ const styles = css`
  */
 export class GcLienzoGlifo extends HTMLElement {
   static tagName = 'gc-glyph-canvas';
-  static observedAttributes = ['ink', 'line-width', 'guide-style', 'guide-next'];
+  static observedAttributes = ['ink', 'line-width', 'guide-style', 'guide-next', 'auto-correct', 'correction'];
 
   static define() {
     return defineElement(this.tagName, this);
@@ -87,7 +104,7 @@ export class GcLienzoGlifo extends HTMLElement {
   #canvas;
   /** @type {CanvasRenderingContext2D} */
   #ctx;
-  /** @type {Stroke[]} */
+  /** @type {InternalStroke[]} */
   #strokes = [];
   /** @type {Stroke | null} */
   #current = null;
@@ -101,6 +118,12 @@ export class GcLienzoGlifo extends HTMLElement {
   #guide = null;
   /** @type {StrokeGrade[]} */
   #feedback = [];
+  /** @type {import('../../nucleo/geometria/correccion.js').SymbolTemplate[]} */
+  #templates = [];
+  /** Trazos borrados que aún se están desvaneciendo. @type {{ stroke: InternalStroke, start: number }[]} */
+  #ghosts = [];
+  /** Puntos de cada trazo ya tocados por el borrado continuo. @type {WeakMap<InternalStroke, Set<number>>} */
+  #touched = new WeakMap();
 
   #resize = new ControladorTamano(this, ({ width, height, pixelRatio }) => {
     this.#width = width;
@@ -179,6 +202,28 @@ export class GcLienzoGlifo extends HTMLElement {
     if (value) this.cancelStroke();
   }
 
+  get autoCorrect() {
+    return this.hasAttribute('auto-correct');
+  }
+  set autoCorrect(value) {
+    this.toggleAttribute('auto-correct', Boolean(value));
+  }
+
+  get correction() {
+    return readNumber(this, 'correction', { fallback: 1, min: 0, max: 1 });
+  }
+  set correction(value) {
+    this.setAttribute('correction', String(value));
+  }
+
+  get templates() {
+    return [...this.#templates];
+  }
+  set templates(value) {
+    if (!Array.isArray(value)) throw new TypeError('<gc-glyph-canvas>.templates necesita un array de plantillas.');
+    this.#templates = value.filter((t) => Array.isArray(t?.points) && t.points.length >= 2);
+  }
+
   get guideStyle() {
     return readEnum(this, 'guide-style', /** @type {const} */ (['ghost', 'faint', 'none']), 'ghost');
   }
@@ -219,7 +264,11 @@ export class GcLienzoGlifo extends HTMLElement {
 
   /** @returns {Stroke[]} */
   get strokes() {
-    return this.#strokes.map((s) => ({ source: s.source, points: s.points.map((p) => ({ ...p })) }));
+    return this.#strokes.map((s) => ({
+      source: s.source,
+      ...(s.shape ? { shape: s.shape } : {}),
+      points: s.points.map((p) => ({ ...p })),
+    }));
   }
 
   get strokeCount() {
@@ -274,9 +323,11 @@ export class GcLienzoGlifo extends HTMLElement {
     this.#current = null;
     const accepted = GcLienzoGlifo.strokeLength(stroke.points) >= MIN_STROKE_LENGTH;
     if (accepted) this.#strokes.push(stroke);
+    const corrected = accepted && this.autoCorrect && stroke.source !== 'program' && this.#correct(stroke);
     this.#requestDraw();
     const copy = accepted ? this.strokes.at(-1) ?? null : null;
     emit(this, 'drawing-ended', { stroke: copy, accepted, index: accepted ? this.#strokes.length - 1 : -1 });
+    if (corrected) emit(this, 'stroke-corrected', { index: this.#strokes.length - 1, shape: stroke.shape });
     if (accepted) this.#changed();
     return copy;
   }
@@ -337,6 +388,47 @@ export class GcLienzoGlifo extends HTMLElement {
   }
 
   /**
+   * Borra solo los trazos que quedan **bajo una zona** (por ejemplo, la palma
+   * de la mano), con un breve desvanecimiento. Un trazo se borra si al menos
+   * `threshold` de sus puntos están dentro, o si su centro lo está.
+   *
+   * Con `accumulate`, lo tocado se suma a lo de las llamadas anteriores: así
+   * se puede «pasar la esponja» por encima de un trazo largo poco a poco.
+   * Una llamada sin `accumulate` empieza de cero.
+   *
+   * @param {{ x: number, y: number }[]} polygon Zona en coordenadas del lienzo (0-1).
+   * @param {{ threshold?: number, accumulate?: boolean }} [options] `threshold` por defecto 0,25.
+   * @returns {number} Trazos borrados.
+   */
+  eraseInside(polygon, { threshold = 0.25, accumulate = false } = {}) {
+    if (!Array.isArray(polygon) || polygon.length < 3 || !polygon.every((p) => Number.isFinite(p?.x) && Number.isFinite(p?.y))) {
+      throw new TypeError('eraseInside necesita un polígono de al menos 3 puntos { x, y }.');
+    }
+    if (this.readonly || this.#clearing) return 0;
+    if (!accumulate) this.#touched = new WeakMap();
+    /** @type {number[]} */
+    const indices = [];
+    this.#strokes.forEach((stroke, i) => {
+      const touched = this.#touched.get(stroke) ?? new Set();
+      stroke.points.forEach((p, k) => {
+        if (pointInPolygon(p, polygon)) touched.add(k);
+      });
+      this.#touched.set(stroke, touched);
+      const center = stroke.points.reduce((c, p) => ({ x: c.x + p.x / stroke.points.length, y: c.y + p.y / stroke.points.length }), { x: 0, y: 0 });
+      if (touched.size / stroke.points.length >= threshold || pointInPolygon(center, polygon)) indices.push(i);
+    });
+    if (!indices.length) return 0;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const now = performance.now();
+    if (!reduced) for (const i of indices) this.#ghosts.push({ stroke: this.#strokes[i], start: now });
+    this.#strokes = this.#strokes.filter((_, i) => !indices.includes(i));
+    this.#requestDraw();
+    emit(this, 'strokes-erased', { count: indices.length, indices });
+    this.#changed();
+    return indices.length;
+  }
+
+  /**
    * Sustituye los trazos (por ejemplo, para restaurar un dibujo guardado).
    * @param {Stroke[]} strokes
    * @throws {TypeError} si el formato no es válido.
@@ -384,6 +476,36 @@ export class GcLienzoGlifo extends HTMLElement {
     }
     const clamp = (/** @type {number} */ v) => Math.min(1, Math.max(0, v));
     return { x: clamp(point.x), y: clamp(point.y), t: Number.isFinite(t) ? t : performance.now() };
+  }
+
+  /**
+   * Sustituye los puntos del trazo por los de su figura ideal y prepara la
+   * animación. Se corrige en píxeles para que un círculo sea un círculo
+   * aunque el lienzo no sea cuadrado.
+   * @param {InternalStroke} stroke
+   * @returns {boolean} `true` si se ha corregido.
+   */
+  #correct(stroke) {
+    const w = this.#width || 1;
+    const h = this.#height || 1;
+    const pixels = stroke.points.map((p) => ({ x: p.x * w, y: p.y * h }));
+    if (this.correction <= 0) return false;
+    // Las plantillas están en el espacio del glifo: la forma no depende de la escala.
+    const result = correctStroke(pixels, { samples: CORRECTED_SAMPLES, templates: this.#templates, strength: this.correction });
+    if (!result) return false;
+    const t0 = stroke.points[0].t;
+    const t1 = stroke.points[stroke.points.length - 1].t;
+    const clamp = (/** @type {number} */ v) => Math.min(1, Math.max(0, v));
+    const from = resample(stroke.points, CORRECTED_SAMPLES).map((p) => ({ x: p.x, y: p.y }));
+    stroke.points = result.points.map((p, i) => ({
+      x: clamp(p.x / w),
+      y: clamp(p.y / h),
+      t: t0 + ((t1 - t0) * i) / (result.points.length - 1),
+    }));
+    stroke.shape = result.kind;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduced) stroke.morph = { from, start: performance.now() };
+    return true;
   }
 
   #changed() {
@@ -444,6 +566,12 @@ export class GcLienzoGlifo extends HTMLElement {
     this.#drawGuide();
     ctx.globalCompositeOperation = 'lighter';
     this.#strokes.forEach((stroke, i) => this.#drawStroke(stroke, false, this.#feedback[i] ?? null));
+    if (this.#ghosts.length) {
+      const now = performance.now();
+      this.#ghosts = this.#ghosts.filter((g) => now - g.start < ERASE_FADE_MS);
+      for (const g of this.#ghosts) this.#drawStroke(g.stroke, false, null, 1 - (now - g.start) / ERASE_FADE_MS);
+      if (this.#ghosts.length) this.#requestDraw();
+    }
     if (this.#current) this.#drawStroke(this.#current, true, null);
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
@@ -482,10 +610,30 @@ export class GcLienzoGlifo extends HTMLElement {
    * @param {Stroke} stroke
    * @param {boolean} live
    * @param {StrokeGrade} grade Corrección (cambia el color de la tinta).
+   * @param {number} [fade] Opacidad global (los trazos borrados se desvanecen).
    */
-  #drawStroke(stroke, live, grade) {
+  #drawStroke(stroke, live, grade, fade = 1) {
     const ctx = this.#ctx;
-    const pts = stroke.points.map((p) => ({ x: p.x * this.#width, y: p.y * this.#height }));
+    /** @type {{ x: number, y: number }[]} */
+    let source = stroke.points;
+    let flash = 0;
+    const morph = /** @type {InternalStroke} */ (stroke).morph;
+    if (morph) {
+      const progress = (performance.now() - morph.start) / MORPH_MS;
+      if (progress >= 1) {
+        delete (/** @type {InternalStroke} */ (stroke).morph);
+      } else {
+        // El trazo «se tensa» hacia su forma ideal con un ligero rebote.
+        const e = 1 + 2.2 * (progress - 1) ** 3 + 1.2 * (progress - 1) ** 2;
+        source = stroke.points.map((p, i) => {
+          const f = morph.from[i] ?? p;
+          return { x: f.x + (p.x - f.x) * e, y: f.y + (p.y - f.y) * e };
+        });
+        flash = 1 - progress;
+        this.#requestDraw();
+      }
+    }
+    const pts = source.map((p) => ({ x: p.x * this.#width, y: p.y * this.#height }));
     const width = this.lineWidth;
     const path = new Path2D();
     path.moveTo(pts[0].x, pts[0].y);
@@ -500,13 +648,13 @@ export class GcLienzoGlifo extends HTMLElement {
 
     const ink = grade ? FEEDBACK_COLORS[grade] : this.ink;
     ctx.strokeStyle = ink;
-    ctx.globalAlpha = 0.16;
-    ctx.lineWidth = width * 3.5;
+    ctx.globalAlpha = (0.16 + flash * 0.4) * fade;
+    ctx.lineWidth = width * (3.5 + flash * 3 + (1 - fade) * 4);
     ctx.stroke(path);
-    ctx.globalAlpha = live ? 1 : 0.9;
+    ctx.globalAlpha = (live ? 1 : 0.9) * fade;
     ctx.lineWidth = width;
     ctx.stroke(path);
-    ctx.globalAlpha = 0.6;
+    ctx.globalAlpha = 0.6 * fade;
     ctx.strokeStyle = '#fff8e6';
     ctx.lineWidth = Math.max(1, width * 0.35);
     ctx.stroke(path);
@@ -524,4 +672,19 @@ export class GcLienzoGlifo extends HTMLElement {
       ctx.fill();
     }
   }
+}
+
+/**
+ * ¿Está el punto dentro del polígono? (algoritmo del rayo)
+ * @param {{ x: number, y: number }} p
+ * @param {{ x: number, y: number }[]} polygon
+ */
+function pointInPolygon(p, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i];
+    const b = polygon[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
 }

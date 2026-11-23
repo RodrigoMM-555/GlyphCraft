@@ -18,7 +18,8 @@ export { GcEscenarioHechizo };
 export { registerSpell, getSpell, spellIds } from './efectos/registro.js';
 export { SistemaParticulas } from './efectos/particulas.js';
 export { Efecto, rand, inDisk, onSphere, amount, particles } from './efectos/efecto.js';
-export { ringMaterial, shellMaterial, rayMaterial, iceMaterial } from './efectos/materiales.js';
+export { ringMaterial, shellMaterial, rayMaterial, iceMaterial, rockMaterial, facetedMaterial, darkDiscMaterial } from './efectos/materiales.js';
+export { COMBINED_SPELLS } from './efectos/hechizos/combinaciones.js';
 export { ACTIVATION_BURST } from './efectos/hechizos/activacion.js';
 
 GcEscenarioHechizo.define();

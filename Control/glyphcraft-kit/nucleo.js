@@ -13,6 +13,8 @@
 /** @typedef {import('./nucleo/reconocimiento/reconocedor-glifos.js').RecognitionResult} RecognitionResult */
 /** @typedef {import('./nucleo/reconocimiento/reconocedor-glifos.js').RecognitionLevel} RecognitionLevel */
 /** @typedef {import('./nucleo/gestos/motor-gestos.js').HandFrame} HandFrame */
+/** @typedef {import('./nucleo/geometria/correccion.js').StrokeCorrection} StrokeCorrection */
+/** @typedef {import('./nucleo/geometria/correccion.js').SymbolTemplate} SymbolTemplate */
 export { MotorGestos, DEFAULT_GESTURE_CONFIG } from './nucleo/gestos/motor-gestos.js';
 export { computeHandFeatures, FEATURE_THRESHOLDS } from './nucleo/gestos/rasgos-mano.js';
 export { LANDMARK, LANDMARK_COUNT, FINGERTIPS, FINGERS, HAND_CONNECTIONS } from './nucleo/gestos/puntos-mano.js';
@@ -29,6 +31,7 @@ export {
   directedChamfer,
   pointwiseDistance,
 } from './nucleo/geometria/trazo.js';
+export { correctStroke, templatesFromGlyphs } from './nucleo/geometria/correccion.js';
 export {
   createGlyph,
   sampleStroke,

@@ -9,13 +9,19 @@
  *
  * La calibración se guarda como `{ cx, cy, size }` (centro y lado relativo
  * al alto de la imagen) para que no dependa de la resolución de la cámara.
+ *
+ * Por defecto (`full: true`) la zona abarca **todo el ancho de la imagen**:
+ * la mano puede moverse por toda la cámara. Como la zona sigue siendo un
+ * cuadrado en píxeles, sobresale un poco por arriba y por abajo de la imagen
+ * (en 4:3, la mano llega del 12,5 % al 87,5 % del alto del lienzo), así un
+ * círculo trazado en el aire sigue siendo un círculo.
  */
 
-/** @typedef {{ cx: number, cy: number, size: number }} Calibration */
+/** @typedef {{ cx: number, cy: number, size: number, full?: boolean }} Calibration */
 /** @typedef {{ x: number, y: number, width: number, height: number }} Zone */
 
-/** Calibración predeterminada: cuadrado centrado del 85 % del alto. */
-export const DEFAULT_CALIBRATION = Object.freeze({ cx: 0.5, cy: 0.5, size: 0.85 });
+/** Calibración predeterminada: toda la cámara. */
+export const DEFAULT_CALIBRATION = Object.freeze({ cx: 0.5, cy: 0.5, size: 1, full: true });
 
 const MIN_SIZE = 0.25;
 const MAX_SIZE = 1;
@@ -28,12 +34,47 @@ const MAX_SIZE = 1;
  * @param {{ imageWidth?: number, imageHeight?: number }} [image]
  * @returns {Zone}
  */
-export function calibrationToZone({ cx, cy, size }, { imageWidth = 640, imageHeight = 480 } = {}) {
+export function calibrationToZone({ cx, cy, size, full = false }, { imageWidth = 640, imageHeight = 480 } = {}) {
+  if (full) {
+    // Cuadrado del ancho de la imagen, centrado: sobresale por arriba y abajo.
+    const side = imageWidth / imageHeight;
+    return { x: 0, y: (1 - side) / 2, width: 1, height: side };
+  }
   const height = clamp(size, MIN_SIZE, MAX_SIZE);
   const width = Math.min(1, (height * imageHeight) / imageWidth);
   const x = clamp(cx - width / 2, 0, 1 - width);
   const y = clamp(cy - height / 2, 0, 1 - height);
   return { x, y, width, height };
+}
+
+/**
+ * Zona centrada de un tamaño dado (Ajustes → Tamaño de la zona de trazado).
+ *
+ * `size` es la fracción del **ancho** de la imagen que ocupa el cuadrado:
+ * 1 = toda la cámara (sobresale por arriba y abajo, como la predeterminada);
+ * 0,5 = un cuadrado de la mitad del ancho, en el centro.
+ *
+ * @param {number} size 0,3-1.
+ * @param {{ imageWidth?: number, imageHeight?: number }} [image]
+ * @returns {Zone}
+ */
+export function zoneFromSize(size, { imageWidth = 640, imageHeight = 480 } = {}) {
+  const width = clamp(Number.isFinite(size) ? size : 1, 0.1, 1);
+  const height = (width * imageWidth) / imageHeight;
+  return { x: (1 - width) / 2, y: (1 - height) / 2, width, height };
+}
+
+/**
+ * Zona de trazado que se usa: la calibración (si se ha hecho) o, si no, la
+ * zona centrada del tamaño elegido en Ajustes.
+ *
+ * @param {Calibration | null} calibration
+ * @param {number} size Ajuste `camera.zoneSize`.
+ * @param {{ imageWidth?: number, imageHeight?: number }} [image]
+ * @returns {Zone}
+ */
+export function activeZone(calibration, size, image) {
+  return calibration ? calibrationToZone(calibration, image) : zoneFromSize(size, image);
 }
 
 /**
@@ -88,7 +129,7 @@ export function mapToCanvas(point, zone, { mirror = true } = {}) {
  */
 export function isCalibration(value) {
   const c = /** @type {Calibration} */ (value);
-  return Boolean(c) && [c.cx, c.cy, c.size].every(Number.isFinite) && c.size > 0;
+  return Boolean(c) && [c.cx, c.cy, c.size].every(Number.isFinite) && c.size > 0 && (c.full === undefined || typeof c.full === 'boolean');
 }
 
 /**

@@ -1,7 +1,8 @@
 import { detectElements, glyphLibrary } from 'glyphcraft-kit/nucleo';
 import { viewHeader } from '../marco-vista.js';
 import { progressStore, audio } from '../../servicios/servicios-app.js';
-import { NAMED_COMBINATIONS, combinationId } from '../../servicios/logros.js';
+import { NAMED_COMBINATIONS } from '../../servicios/logros.js';
+import { glyphPower, powerLabel, spellsFor } from '../../servicios/hechizos.js';
 
 /** @typedef {import('../practica/estacion-lanzamiento.js').EstacionLanzamiento} EstacionLanzamiento */
 /** @typedef {import('glyphcraft-kit/nucleo').Glyph} Glyph */
@@ -10,8 +11,9 @@ import { NAMED_COMBINATIONS, combinationId } from '../../servicios/logros.js';
  * Laboratorio: combinar símbolos de varios glifos dentro de un mismo círculo.
  *
  * Al sellar, `detectElements` averigua qué combinación de símbolos explica
- * el dibujo y se lanzan todos sus hechizos a la vez. Algunas combinaciones
- * tienen nombre propio y se anotan como descubrimientos.
+ * el dibujo. Las combinaciones con nombre lanzan **su propio hechizo
+ * combinado** y se anotan como descubrimientos; el resto se funden con la
+ * «fusión arcana».
  *
  * Es un espacio de experimentación: no hace falta haber aprendido los glifos.
  */
@@ -39,13 +41,13 @@ export class VistaLaboratorio extends HTMLElement {
         kicker: 'Mesa de experimentos',
         title: 'Laboratorio',
         intro:
-          'Traza el círculo y, dentro, dos o tres símbolos del grimorio —por ejemplo, el triángulo de Ignis y la espiral de Ventus—. Ponlos donde quieras y del tamaño que quieras: lado a lado, uno encima de otro o superpuestos. Termina cada símbolo antes de empezar el siguiente y sella.',
+          'Traza el círculo y, dentro, dos o tres símbolos del grimorio —por ejemplo, el triángulo de Ignis y la espiral de Ventus—. Ponlos donde quieras y del tamaño que quieras: lado a lado, uno encima de otro o superpuestos. Termina cada símbolo antes de empezar el siguiente y sella. Cada combinación con nombre tiene un hechizo único.',
       })}
       <gc-casting-station></gc-casting-station>`;
     this.#station = /** @type {EstacionLanzamiento} */ (this.querySelector('gc-casting-station'));
     this.#station.setHint('Traza el círculo y combina símbolos dentro');
     this.#station.extras.innerHTML = `
-      <section class="lab-result" hidden aria-live="polite">
+      <section class="lab-result" hidden aria-label="Resultado del experimento">
         <p class="kicker lab-result__kicker"></p>
         <p class="lab-result__name"></p>
         <p class="lab-result__text"></p>
@@ -69,6 +71,7 @@ export class VistaLaboratorio extends HTMLElement {
         li.className = found[id] ? 'is-found' : '';
         li.textContent = found[id] ? combo.name : '· · ·';
         li.title = found[id] ? combo.text : 'Combinación por descubrir';
+        if (!found[id]) li.setAttribute('aria-label', 'Combinación por descubrir');
         return li;
       }),
     );
@@ -89,6 +92,7 @@ export class VistaLaboratorio extends HTMLElement {
       $('.lab-result__kicker').textContent = 'Sin círculo';
       $('.lab-result__name').textContent = 'La mezcla se dispersa';
       $('.lab-result__text').textContent = 'Todo experimento empieza por el círculo exterior, trazado de un solo gesto.';
+      this.#station.announce('Sin círculo. Todo experimento empieza por el círculo exterior.');
       return;
     }
     if (!result.elements.length) {
@@ -98,25 +102,27 @@ export class VistaLaboratorio extends HTMLElement {
       $('.lab-result__name').textContent = 'Los símbolos no responden';
       $('.lab-result__text').textContent =
         'No reconozco los símbolos. Termina cada uno antes de empezar el siguiente y trázalos parecidos a los de sus páginas del grimorio.';
+      this.#station.announce('Los símbolos no responden. Termina cada uno antes de empezar el siguiente.');
       return;
     }
 
     const glyphs = result.elements;
-    const id = combinationId(glyphs.map((g) => g.id));
-    const combo = NAMED_COMBINATIONS[id];
+    const { spells, combo } = spellsFor(glyphs);
+    const power = glyphPower(result.transform.r);
     panel.dataset.outcome = 'cast';
     $('.lab-result__elements').replaceChildren(
       ...glyphs.map((g) => Object.assign(document.createElement('li'), { textContent: g.name })),
+      Object.assign(document.createElement('li'), { className: 'lab-result__power', textContent: `Potencia ${powerLabel(power).toLowerCase()}` }),
     );
     if (glyphs.length === 1) {
       $('.lab-result__kicker').textContent = 'Un solo símbolo';
       $('.lab-result__name').textContent = glyphs[0].name;
       $('.lab-result__text').textContent = 'Funciona, pero en el laboratorio la magia está en combinar: añade otro símbolo dentro del círculo.';
     } else {
-      const isNew = progressStore.recordDiscovery(id);
-      $('.lab-result__kicker').textContent = isNew ? '¡Nuevo descubrimiento!' : 'Combinación conocida';
+      const isNew = combo ? progressStore.recordDiscovery(combo.id) : false;
+      $('.lab-result__kicker').textContent = combo ? (isNew ? '¡Nuevo descubrimiento!' : 'Combinación conocida') : 'Fusión arcana';
       $('.lab-result__name').textContent = combo?.name ?? 'Experimento sin catalogar';
-      $('.lab-result__text').textContent = combo?.text ?? 'Una mezcla que ningún grimorio recoge todavía. Su efecto es imprevisible.';
+      $('.lab-result__text').textContent = combo?.text ?? 'Una mezcla que ningún grimorio recoge todavía: sus energías se trenzan sin llegar a fundirse.';
       if (isNew && combo) {
         /** @type {import('glyphcraft-kit').GcSusurro | null} */ (document.querySelector('gc-whisper'))?.show({
           type: 'arcane',
@@ -126,6 +132,7 @@ export class VistaLaboratorio extends HTMLElement {
         });
       }
     }
-    await this.#station.activate(glyphs, result.transform, { score: 85 });
+    this.#station.announce(`${$('.lab-result__name').textContent}. ${$('.lab-result__text').textContent}`);
+    await this.#station.activate(glyphs, result.transform, { score: 85, spells, power });
   };
 }

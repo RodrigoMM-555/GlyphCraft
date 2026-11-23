@@ -30,9 +30,34 @@ export class Aplicacion extends HTMLElement {
 
   connectedCallback() {
     this.innerHTML = `
-      <gc-arcane-backdrop class="app__backdrop" density="0.55"></gc-arcane-backdrop>
-      <main class="app__outlet" id="main"></main>
-      <gc-whisper></gc-whisper>`;
+      <button type="button" class="skip-link">Saltar al contenido</button>
+      <gc-arcane-backdrop class="app__backdrop" density="0.55" aria-hidden="true"></gc-arcane-backdrop>
+      <main class="app__outlet" id="main" tabindex="-1"></main>
+      <gc-whisper></gc-whisper>
+      <p class="route-announcer visually-hidden" aria-live="polite"></p>
+      <dialog class="help-dialog" aria-labelledby="help-title">
+        <h2 id="help-title">Ayuda y atajos de teclado</h2>
+        <dl class="help-dialog__list">
+          <div><dt><kbd>?</kbd></dt><dd>Abre o cierra esta ayuda</dd></div>
+          <div><dt><kbd>Esc</kbd></dt><dd>Vuelve al menú principal (o cierra esta ayuda)</dd></div>
+          <div><dt><kbd>Tab</kbd> / <kbd>Mayús</kbd>+<kbd>Tab</kbd></dt><dd>Recorre los controles</dd></div>
+          <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Grimorio: pasa las páginas</dd></div>
+          <div><dt><kbd>S</kbd></dt><dd>Práctica: sella el glifo</dd></div>
+          <div><dt><kbd>Z</kbd> o <kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Práctica: deshace el último trazo</dd></div>
+          <div><dt><kbd>X</kbd></dt><dd>Práctica: borra el lienzo</dd></div>
+          <div><dt><kbd>C</kbd></dt><dd>Práctica: enciende o apaga la cámara</dd></div>
+        </dl>
+        <p class="help-dialog__note">Con la cámara: índice levantado para dibujar, mano abierta encima de un trazo para borrarlo y puño cerrado para sellar.
+          En Ajustes → Accesibilidad puedes agrandar el texto, subir el contraste, reducir el movimiento y oír los resultados en voz alta.</p>
+        <form method="dialog"><gc-rune-button size="sm" class="help-dialog__close">Cerrar</gc-rune-button></form>
+      </dialog>`;
+    this.querySelector('.skip-link')?.addEventListener('click', () => {
+      const target = /** @type {HTMLElement | null} */ (this.#outlet?.querySelector('h1') ?? this.#outlet);
+      target?.focus();
+    });
+    this.querySelector('.help-dialog__close')?.addEventListener('rune-activate', () => {
+      /** @type {HTMLDialogElement} */ (this.querySelector('.help-dialog')).close();
+    });
     this.#backdrop = this.querySelector('gc-arcane-backdrop');
     this.#whisper = this.querySelector('gc-whisper');
     this.#outlet = this.querySelector('main');
@@ -75,6 +100,7 @@ export class Aplicacion extends HTMLElement {
     const { nav, action } = button.dataset;
     if (nav) this.#router.navigate(nav);
     if (action === 'fullscreen') this.#toggleFullscreen();
+    if (action === 'help') /** @type {HTMLDialogElement} */ (this.querySelector('.help-dialog')).showModal();
   };
 
   /**
@@ -89,6 +115,22 @@ export class Aplicacion extends HTMLElement {
 
   /** @param {KeyboardEvent} event */
   #onKeyDown = (event) => {
+    const dialog = /** @type {HTMLDialogElement} */ (this.querySelector('.help-dialog'));
+    // Con la ayuda abierta, Esc y ? solo la cierran (no se sale de la sección).
+    if (dialog.open) {
+      if (event.key === '?' || event.key === 'Escape') {
+        event.preventDefault();
+        dialog.close();
+      }
+      return;
+    }
+    const target = /** @type {HTMLElement} */ (event.target);
+    const typing = target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement;
+    if (event.key === '?' && !typing) {
+      event.preventDefault();
+      dialog.showModal();
+      return;
+    }
     if (event.key === 'Escape' && this.#router.current?.path !== '/') {
       this.#router.navigate('/');
     }
@@ -117,6 +159,9 @@ export class Aplicacion extends HTMLElement {
     const swap = () => {
       this.#outlet?.replaceChildren(view);
       if (!this.#firstRender) view.querySelector('h1')?.focus({ preventScroll: true });
+      // Anuncia el cambio de sección a los lectores de pantalla.
+      const live = this.querySelector('.route-announcer');
+      if (live && !this.#firstRender) live.textContent = `Sección: ${route.title}`;
       this.#firstRender = false;
       window.scrollTo(0, 0);
     };

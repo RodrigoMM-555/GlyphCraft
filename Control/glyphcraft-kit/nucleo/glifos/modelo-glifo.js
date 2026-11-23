@@ -29,7 +29,7 @@ import { pathLength } from '../geometria/trazo.js';
  * )} StrokeDef
  */
 
-/** @typedef {'fire' | 'water' | 'wind' | 'light' | 'protection' | 'ice' | 'arcane'} GlyphElement */
+/** @typedef {'fire' | 'water' | 'wind' | 'light' | 'protection' | 'ice' | 'earth' | 'lightning' | 'shadow' | 'arcane'} GlyphElement */
 
 /**
  * Definición de un glifo (lo que se escribe en el catálogo).
@@ -56,7 +56,7 @@ import { pathLength } from '../geometria/trazo.js';
  */
 
 export const GLYPH_ELEMENTS = Object.freeze(
-  /** @type {GlyphElement[]} */ (['fire', 'water', 'wind', 'light', 'protection', 'ice', 'arcane']),
+  /** @type {GlyphElement[]} */ (['fire', 'water', 'wind', 'light', 'protection', 'ice', 'earth', 'lightning', 'shadow', 'arcane']),
 );
 
 const STROKE_TYPES = ['circle', 'line', 'polyline', 'wave', 'spiral'];

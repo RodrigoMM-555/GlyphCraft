@@ -1,4 +1,5 @@
-import { fire, water, wind, light, aegis, ice } from './hechizos/elementos.js';
+import { fire, water, wind, light, aegis, ice, lightning, earth, shadow } from './hechizos/elementos.js';
+import { COMBINED_SPELLS } from './hechizos/combinaciones.js';
 
 /** @typedef {[number, number, number]} RGB */
 /** @typedef {import('./efecto.js').SpellContext} SpellContext */
@@ -46,3 +47,9 @@ registerSpell('wind', { label: 'Viento', color: [0.55, 0.95, 0.8], accent: [0.9,
 registerSpell('light', { label: 'Luz', color: [1, 0.88, 0.5], accent: [1, 1, 0.9], create: light });
 registerSpell('aegis', { label: 'Protección', color: [0.65, 0.55, 1], accent: [0.85, 0.8, 1], create: aegis });
 registerSpell('ice', { label: 'Hielo', color: [0.6, 0.85, 1], accent: [0.95, 1, 1], create: ice });
+registerSpell('lightning', { label: 'Rayo', color: [0.7, 0.75, 1], accent: [1, 1, 1], create: lightning });
+registerSpell('earth', { label: 'Tierra', color: [0.85, 0.6, 0.3], accent: [0.95, 0.8, 0.55], create: earth });
+registerSpell('shadow', { label: 'Sombra', color: [0.55, 0.3, 0.95], accent: [0.85, 0.6, 1], create: shadow });
+
+// Hechizos combinados: cada combinación con nombre del laboratorio tiene su propio efecto.
+for (const [id, spell] of Object.entries(COMBINED_SPELLS)) registerSpell(id, spell);

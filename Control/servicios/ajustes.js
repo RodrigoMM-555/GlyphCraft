@@ -31,8 +31,10 @@ export const SETTINGS_VERSION = 1;
 
 /** @type {Readonly<Record<string, SettingDescriptor>>} */
 export const SETTINGS_SCHEMA = Object.freeze({
+  'camera.enabled': { type: 'boolean', default: true },
   'camera.deviceId': { type: 'string', default: '' },
   'camera.showVideo': { type: 'boolean', default: true },
+  'camera.zoneSize': { type: 'number', default: 1, min: 0.3, max: 1 },
   'camera.calibration': { type: 'calibration', default: null },
   'hands.showOnCanvas': { type: 'boolean', default: true },
   'hands.style': { type: 'enum', default: 'constellation', values: ['constellation', 'skeleton', 'minimal'] },
@@ -41,15 +43,36 @@ export const SETTINGS_SCHEMA = Object.freeze({
   'hands.smoothing': { type: 'number', default: 0.5, min: 0, max: 1 },
   'hands.eraseHoldMs': { type: 'number', default: 800, min: 300, max: 2000 },
   'hands.sealHoldMs': { type: 'number', default: 600, min: 300, max: 2000 },
+  'drawing.correction': { type: 'number', default: 1, min: 0, max: 1 },
   'recognition.level': { type: 'enum', default: 'apprentice', values: ['apprentice', 'artisan', 'master'] },
   'recognition.tolerance': { type: 'number', default: 0.5, min: 0, max: 1 },
   'effects.enabled': { type: 'boolean', default: true },
   'effects.quality': { type: 'enum', default: 'medium', values: ['low', 'medium', 'high'] },
   'sound.enabled': { type: 'boolean', default: true },
   'sound.volume': { type: 'number', default: 0.6, min: 0, max: 1 },
+  'a11y.textScale': { type: 'number', default: 1, min: 1, max: 1.5 },
+  'a11y.highContrast': { type: 'boolean', default: false },
+  'a11y.reduceMotion': { type: 'boolean', default: false },
+  'a11y.speak': { type: 'boolean', default: false },
 });
 
 /** @typedef {keyof typeof SETTINGS_SCHEMA} SettingKey */
+
+/**
+ * Corrección máxima de los trazos en cada nivel: cuanto más alto el nivel,
+ * menos ayuda (igual que la guía, que se atenúa y desaparece).
+ */
+export const CORRECTION_LIMITS = Object.freeze({ apprentice: 1, artisan: 0.6, master: 0.3 });
+
+/**
+ * Intensidad de corrección que se aplica: la elegida, sin pasar del máximo del nivel.
+ * @param {number} chosen Ajuste `drawing.correction` (0-1).
+ * @param {'apprentice' | 'artisan' | 'master'} level
+ */
+export function effectiveCorrection(chosen, level) {
+  const limit = CORRECTION_LIMITS[level] ?? 1;
+  return Math.max(0, Math.min(limit, Number.isFinite(chosen) ? chosen : 1));
+}
 
 /**
  * Valida un valor según su descriptor. Devuelve el valor (corregido) o el
@@ -97,6 +120,8 @@ export function migrate(stored, legacy) {
       'recognition.level': legacy.level,
     };
   }
+  // Antes la corrección era un interruptor; ahora es una intensidad 0-1.
+  if (values['drawing.correction'] === undefined && values['drawing.autoCorrect'] === false) values['drawing.correction'] = 0;
   /** @type {Record<string, unknown>} */
   const clean = {};
   for (const [key, descriptor] of Object.entries(SETTINGS_SCHEMA)) clean[key] = sanitizeSetting(descriptor, values[key]);

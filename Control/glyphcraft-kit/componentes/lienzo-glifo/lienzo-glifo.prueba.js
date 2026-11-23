@@ -262,3 +262,121 @@ describe('<gc-glyph-canvas> · guía y corrección', () => {
     expect(el.feedback).toEqual([]);
   });
 });
+
+describe('<gc-glyph-canvas> · auto-correct', () => {
+  /**
+   * Dibuja un círculo tembloroso como si fuera con el ratón.
+   * @param {GcLienzoGlifo} el
+   */
+  function wobblyCircle(el, source = /** @type {'pointer' | 'program'} */ ('pointer')) {
+    const n = 60;
+    const at = (/** @type {number} */ i) => {
+      const t = -Math.PI / 2 + (i / n) * Math.PI * 2;
+      const r = 0.35 + 0.02 * Math.sin(t * 7);
+      return { x: 0.5 + Math.cos(t) * r, y: 0.5 + Math.sin(t) * r };
+    };
+    el.beginStroke(at(0), { source });
+    for (let i = 1; i <= n; i++) el.addPoint(at(i));
+    return el.endStroke();
+  }
+
+  it('está desactivado por defecto: el trazo se guarda tal cual', () => {
+    const el = mount();
+    expect(el.autoCorrect).toBe(false);
+    const stroke = wobblyCircle(el);
+    expect(stroke && 'shape' in stroke).toBe(false);
+  });
+
+  it('convierte el trazo en su figura ideal y avisa con stroke-corrected', () => {
+    const el = mount('auto-correct');
+    const onCorrected = vi.fn();
+    el.addEventListener('stroke-corrected', onCorrected);
+    const stroke = /** @type {import('./lienzo-glifo.js').Stroke} */ (wobblyCircle(el));
+    expect(stroke.shape).toBe('circle');
+    expect(onCorrected).toHaveBeenCalledOnce();
+    expect(onCorrected.mock.calls[0][0].detail).toEqual({ index: 0, shape: 'circle' });
+    // Todos los puntos quedan a la misma distancia del centro.
+    const radii = stroke.points.map((p) => Math.hypot(p.x - 0.5, p.y - 0.5));
+    expect(Math.max(...radii) - Math.min(...radii)).toBeLessThan(0.01);
+    expect(el.strokes[0].shape).toBe('circle');
+  });
+
+  it('no corrige los trazos añadidos por programa', () => {
+    const el = mount('auto-correct');
+    const stroke = wobblyCircle(el, 'program');
+    expect(stroke && 'shape' in stroke).toBe(false);
+  });
+});
+
+describe('<gc-glyph-canvas> · eraseInside (borrar bajo la mano)', () => {
+  const square = (/** @type {number} */ x0, /** @type {number} */ y0, /** @type {number} */ x1, /** @type {number} */ y1) => [
+    { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 },
+  ];
+
+  it('borra solo los trazos que quedan dentro de la zona, todos los que haya', () => {
+    const el = mount();
+    line(el, [0.1, 0.2], [0.3, 0.2]); // 0: izquierda arriba
+    line(el, [0.1, 0.3], [0.3, 0.3]); // 1: izquierda, debajo
+    line(el, [0.7, 0.8], [0.9, 0.8]); // 2: derecha abajo
+    const onErased = vi.fn();
+    el.addEventListener('strokes-erased', onErased);
+    expect(el.eraseInside(square(0.05, 0.1, 0.4, 0.4))).toBe(2);
+    expect(el.strokeCount).toBe(1);
+    expect(el.strokes[0].points[0].x).toBeCloseTo(0.7);
+    expect(onErased.mock.calls[0][0].detail).toEqual({ count: 2, indices: [0, 1] });
+  });
+
+  it('no borra nada si la zona no toca ningún trazo; un trazo apenas rozado tampoco', () => {
+    const el = mount();
+    line(el, [0.1, 0.5], [0.9, 0.5]);
+    expect(el.eraseInside(square(0.6, 0.0, 0.9, 0.2))).toBe(0);
+    expect(el.eraseInside(square(0.85, 0.4, 0.95, 0.6))).toBe(0); // toca solo la punta (≈ 6 %)
+    expect(el.strokeCount).toBe(1);
+  });
+
+  it('con accumulate, pasar la zona poco a poco por un trazo largo acaba borrándolo', () => {
+    const el = mount();
+    line(el, [0.1, 0.5], [0.9, 0.5], 40);
+    expect(el.eraseInside(square(0.05, 0.4, 0.2, 0.6))).toBe(0);
+    expect(el.eraseInside(square(0.2, 0.4, 0.35, 0.6), { accumulate: true })).toBe(1);
+    expect(el.strokeCount).toBe(0);
+  });
+
+  it('valida el polígono', () => {
+    const el = mount();
+    // @ts-expect-error
+    expect(() => el.eraseInside(null)).toThrow(TypeError);
+    expect(() => el.eraseInside([{ x: 0, y: 0 }, { x: 1, y: 1 }])).toThrow(TypeError);
+  });
+});
+
+describe('<gc-glyph-canvas> · correction y templates', () => {
+  it('correction="0" no toca el trazo aunque auto-correct esté activo', () => {
+    const el = mount('auto-correct correction="0"');
+    el.beginStroke({ x: 0.2, y: 0.5 }, { source: 'pointer' });
+    for (let i = 1; i <= 20; i++) el.addPoint({ x: 0.2 + i * 0.03, y: 0.5 + Math.sin(i) * 0.01 });
+    const stroke = el.endStroke();
+    expect(stroke && 'shape' in stroke).toBe(false);
+  });
+
+  it('con plantillas, el trazo se ajusta al símbolo y lo indica en shape', () => {
+    const el = mount('auto-correct');
+    // Plantilla: un zigzag como el de Fulgur.
+    el.templates = [{ id: 'rayo:1', closed: false, vertices: 4, points: [{ x: 0.2, y: -0.66 }, { x: -0.24, y: 0.02 }, { x: 0.24, y: -0.02 }, { x: -0.2, y: 0.66 }] }];
+    expect(el.templates).toHaveLength(1);
+    const corners = [[0.6, 0.2], [0.38, 0.52], [0.63, 0.47], [0.4, 0.8]];
+    el.beginStroke({ x: 0.6, y: 0.2 }, { source: 'pointer' });
+    for (let k = 1; k < corners.length; k++) {
+      const [ax, ay] = corners[k - 1];
+      const [bx, by] = corners[k];
+      for (let s = 1; s <= 12; s++) el.addPoint({ x: ax + ((bx - ax) * s) / 12 + Math.sin(s * k) * 0.004, y: ay + ((by - ay) * s) / 12 });
+    }
+    expect(el.endStroke()?.shape).toBe('template');
+  });
+
+  it('templates valida su valor', () => {
+    const el = mount();
+    // @ts-expect-error
+    expect(() => (el.templates = 'rayo')).toThrow(TypeError);
+  });
+});

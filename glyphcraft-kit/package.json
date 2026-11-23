@@ -1,6 +1,6 @@
 {
   "name": "glyphcraft-kit",
-  "version": "2.0.0",
+  "version": "2.3.0",
   "description": "Web Components y lógica de reconocimiento gestual para dibujar glifos mágicos con las manos.",
   "keywords": [
     "web-components",

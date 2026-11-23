@@ -31,7 +31,8 @@ export const ACHIEVEMENTS = Object.freeze([
   { id: 'trazo-impecable', title: 'Trazo impecable', description: 'Consigue 100 de precisión.', rune: 'target', test: (t) => t.bestScore >= 100 },
   { id: 'maestria', title: 'Maestría', description: 'Domina un glifo en nivel Maestro.', rune: 'progress', test: (t) => t.mastered >= 1 },
   { id: 'lanzador', title: 'Lanzador incansable', description: 'Lanza diez hechizos de memoria.', rune: 'practice', test: (t) => t.casts >= 10 },
-  { id: 'alquimista', title: 'Alquimista', description: 'Descubre una combinación en el laboratorio.', rune: 'lab', test: (t) => t.discoveries >= 1 },
+  { id: 'alquimista', title: 'Alquimista', description: 'Descubre una combinación con nombre.', rune: 'lab', test: (t) => t.discoveries >= 1 },
+  { id: 'gran-alquimista', title: 'Gran alquimista', description: 'Descubre diez combinaciones.', rune: 'lab', test: (t) => t.discoveries >= 10 },
   { id: 'constancia', title: 'Constancia', description: 'Practica durante 30 minutos.', rune: 'eye', test: (t) => t.practiceMs >= 30 * 60 * 1000 },
 ]);
 
@@ -69,20 +70,32 @@ export function rankIndex({ learned, mastered }, glyphCount) {
 
 /**
  * Combinaciones con nombre propio del laboratorio (por identificadores de
- * glifo ordenados alfabéticamente y unidos con `+`).
- * @type {Readonly<Record<string, { name: string, text: string }>>}
+ * glifo ordenados alfabéticamente y unidos con `+`). Cada una lanza su
+ * propio hechizo combinado (`spell`), distinto de la suma de sus elementos.
+ * @type {Readonly<Record<string, { name: string, text: string, spell: string }>>}
  */
 export const NAMED_COMBINATIONS = Object.freeze({
-  'ignis+ventus': { name: 'Tormenta ígnea', text: 'El viento aviva las llamas hasta convertirlas en remolino.' },
-  'aqua+ignis': { name: 'Velo de vapor', text: 'Agua y fuego se anulan en una niebla cálida.' },
-  'aqua+glacies': { name: 'Ventisca', text: 'El agua se congela en el aire antes de caer.' },
-  'aqua+ventus': { name: 'Tempestad', text: 'Lluvia arrastrada por un viento furioso.' },
-  'aegis+lux': { name: 'Égida solar', text: 'Un escudo que brilla como el mediodía.' },
-  'glacies+lux': { name: 'Prisma helado', text: 'La luz se quiebra en mil cristales.' },
-  'ignis+lux': { name: 'Sol naciente', text: 'Una llama tan pura que ilumina el taller.' },
-  'glacies+ventus': { name: 'Aliento boreal', text: 'Un soplo helado del norte.' },
-  'aegis+ignis': { name: 'Muralla de brasas', text: 'Una barrera que quema a quien la toca.' },
-  'aegis+aqua': { name: 'Burbuja abisal', text: 'Un refugio de agua en calma.' },
+  'ignis+ventus': { name: 'Tormenta ígnea', text: 'El viento aviva las llamas hasta convertirlas en un tornado de fuego.', spell: 'tormenta-ignea' },
+  'aqua+ignis': { name: 'Velo de vapor', text: 'Agua y fuego se anulan en una niebla cálida que asciende.', spell: 'velo-vapor' },
+  'aqua+glacies': { name: 'Ventisca', text: 'El agua se congela en el aire y barre el círculo.', spell: 'ventisca' },
+  'aqua+ventus': { name: 'Tempestad', text: 'Lluvia arrastrada por un viento furioso bajo nubes negras.', spell: 'tempestad' },
+  'aegis+lux': { name: 'Égida solar', text: 'Un escudo que brilla como el mediodía.', spell: 'egida-solar' },
+  'glacies+lux': { name: 'Prisma helado', text: 'La luz atraviesa el cristal y se abre en todos sus colores.', spell: 'prisma-helado' },
+  'ignis+lux': { name: 'Sol naciente', text: 'Una llama tan pura que se eleva como un sol.', spell: 'sol-naciente' },
+  'glacies+ventus': { name: 'Aliento boreal', text: 'Un soplo helado del norte que pinta auroras.', spell: 'aliento-boreal' },
+  'aegis+ignis': { name: 'Muralla de brasas', text: 'Un anillo de fuego que quema a quien lo cruza.', spell: 'muralla-brasas' },
+  'aegis+aqua': { name: 'Burbuja abisal', text: 'Un refugio de agua en calma.', spell: 'burbuja-abisal' },
+  'fulgur+ventus': { name: 'Tormenta eléctrica', text: 'Nubes que giran y descargan rayo tras rayo.', spell: 'tormenta-electrica' },
+  'aqua+fulgur': { name: 'Marea voltaica', text: 'Una esfera de agua recorrida por chispazos.', spell: 'marea-voltaica' },
+  'fulgur+ignis': { name: 'Plasma', text: 'El fuego más caliente: un corazón que lanza arcos.', spell: 'plasma' },
+  'ignis+terra': { name: 'Erupción', text: 'La roca se abre y escupe lava.', spell: 'erupcion' },
+  'aqua+terra': { name: 'Géiser', text: 'Agua a presión que revienta el suelo.', spell: 'geiser' },
+  'aegis+terra': { name: 'Bastión de piedra', text: 'Columnas de roca levantan una fortaleza.', spell: 'bastion-piedra' },
+  'lux+umbra': { name: 'Eclipse', text: 'La sombra cubre la luz y solo queda su corona.', spell: 'eclipse' },
+  'glacies+umbra': { name: 'Noche polar', text: 'Oscuridad helada con cristales que orbitan.', spell: 'noche-polar' },
+  'fulgur+glacies': { name: 'Rayo cristalino', text: 'Cada impacto del rayo deja hielo al enfriarse.', spell: 'rayo-cristalino' },
+  'terra+ventus': { name: 'Tormenta de arena', text: 'El viento arranca el polvo y la grava del suelo.', spell: 'tormenta-arena' },
+  'ignis+umbra': { name: 'Fuego fatuo', text: 'Llamas frías que flotan en la oscuridad.', spell: 'fuego-fatuo' },
 });
 
 /**

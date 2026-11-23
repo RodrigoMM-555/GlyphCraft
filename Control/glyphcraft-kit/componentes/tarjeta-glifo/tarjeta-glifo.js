@@ -13,6 +13,9 @@ export const ELEMENT_LABELS = Object.freeze({
   light: 'Luz',
   protection: 'Protección',
   ice: 'Hielo',
+  earth: 'Tierra',
+  lightning: 'Rayo',
+  shadow: 'Sombra',
   arcane: 'Arcano',
 });
 

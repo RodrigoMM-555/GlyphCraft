@@ -2710,6 +2710,32 @@
             },
             {
               "kind": "field",
+              "name": "autoCorrect",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Al terminar cada trazo (de la mano o del puntero), lo convierte en la figura que se quería hacer —círculo, línea, polígono regular, estrella, onda, espiral…— con una breve animación.",
+              "attribute": "auto-correct"
+            },
+            {
+              "kind": "field",
+              "name": "correction",
+              "type": {
+                "text": "number"
+              },
+              "description": "Intensidad de la corrección (0-1).",
+              "attribute": "correction"
+            },
+            {
+              "kind": "field",
+              "name": "templates",
+              "type": {
+                "text": "SymbolTemplate[]"
+              },
+              "description": "(Diseño) Símbolos a los que se ajustan los trazos con `auto-correct` (ver `templatesFromGlyphs`): una luna mal hecha se vuelve la luna exacta del glifo."
+            },
+            {
+              "kind": "field",
               "name": "guide",
               "return": {
                 "type": {
@@ -2859,6 +2885,33 @@
               "return": {
                 "type": {
                   "text": "Promise<boolean>"
+                }
+              }
+            },
+            {
+              "kind": "method",
+              "name": "eraseInside",
+              "parameters": [
+                {
+                  "name": "polygon",
+                  "description": "Zona en coordenadas del lienzo (0-1).",
+                  "type": {
+                    "text": "{ x: number, y: number }[]"
+                  }
+                },
+                {
+                  "name": "options",
+                  "optional": true,
+                  "description": "`threshold` (fracción de puntos dentro, 0,25) y `accumulate` (borrado continuo).",
+                  "type": {
+                    "text": "{ threshold?: number, accumulate?: boolean }"
+                  }
+                }
+              ],
+              "description": "Borra solo los trazos que quedan bajo una zona (por ejemplo, la palma de la mano), con un breve desvanecimiento.",
+              "return": {
+                "type": {
+                  "text": "number"
                 }
               }
             },
@@ -3061,10 +3114,24 @@
             },
             {
               "type": {
+                "text": "CustomEvent<{index: number, shape: string}>"
+              },
+              "description": "Un trazo se ha convertido en su figura ideal (`auto-correct`).",
+              "name": "stroke-corrected"
+            },
+            {
+              "type": {
                 "text": "CustomEvent<{count: number}>"
               },
               "description": "Cambia el número de trazos.",
               "name": "strokes-changed"
+            },
+            {
+              "type": {
+                "text": "CustomEvent<{count: number, indices: number[]}>"
+              },
+              "description": "Se han borrado los trazos que había bajo una zona (`eraseInside`).",
+              "name": "strokes-erased"
             },
             {
               "type": {
@@ -3130,6 +3197,22 @@
               },
               "description": "Impide añadir trazos.",
               "name": "readonly"
+            },
+            {
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Al terminar cada trazo (de la mano o del puntero), lo convierte en la figura que se quería hacer —círculo, línea, polígono regular, estrella, onda, espiral…— con una breve animación.",
+              "name": "auto-correct",
+              "fieldName": "autoCorrect"
+            },
+            {
+              "type": {
+                "text": "number"
+              },
+              "description": "Intensidad de la corrección (0-1): 1 = la figura perfecta, 0,5 = a medio camino. Por defecto `1`.",
+              "name": "correction",
+              "fieldName": "correction"
             }
           ],
           "superclass": {
@@ -4210,7 +4293,7 @@
                   }
                 },
                 {
-                  "name": "{ x = 0.5, y = 0.5, radius = 0.4, strokes = [], intensity = 1, stability = 1 }",
+                  "name": "{ x = 0.5, y = 0.5, radius = 0.4, strokes = [], intensity = 1, stability = 1, power = 1 }",
                   "default": "{}"
                 },
                 {

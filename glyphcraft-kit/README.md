@@ -57,7 +57,7 @@ npm install three @mediapipe/tasks-vision   # solo si usas /efectos o /seguimien
 | `glyphcraft-kit/nucleo` | `nucleo.js` | Gestos, filtros, geometría, modelo de glifos, reconocedor, combinaciones |
 | `glyphcraft-kit/seguimiento` | `seguimiento.js` | `FuenteManoMediaPipe`, `FuenteManoGrabada`, `GrabadorSesion` |
 | `glyphcraft-kit/efectos` | `efectos.js` | `<gc-spell-stage>` y hechizos (requiere `three`) |
-| `glyphcraft-kit/glifos` | `glifos.js` | Grimorio inicial de seis glifos |
+| `glyphcraft-kit/glifos` | `glifos.js` | Grimorio inicial de nueve glifos |
 | `glyphcraft-kit/sinteticos` | `sinteticos.js` | Manos y dibujos sintéticos para pruebas |
 | `glyphcraft-kit/tokens.css` | `tokens.css` | Design tokens |
 

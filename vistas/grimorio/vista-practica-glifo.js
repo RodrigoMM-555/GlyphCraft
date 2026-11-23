@@ -94,7 +94,7 @@ export class VistaPracticaGlifo extends HTMLElement {
         <gc-arcane-meter class="scores__precision" label="Precisión"></gc-arcane-meter>
         <gc-arcane-meter class="scores__seals" variant="seals" max="${CASTS_TO_LEARN}" label="Aprendizaje"></gc-arcane-meter>
       </div>
-      <div class="evaluation" aria-live="polite">
+      <div class="evaluation">
         <p class="evaluation__summary"></p>
         <ul class="evaluation__issues"></ul>
       </div>`;
@@ -113,9 +113,9 @@ export class VistaPracticaGlifo extends HTMLElement {
       button.pressed = active;
     }
     const help = {
-      apprentice: `Guía visible. Da igual el orden de los trazos. Hace falta ${config.threshold} de precisión.`,
-      artisan: `Guía tenue. Respeta el orden y el número de trazos. Hace falta ${config.threshold}.`,
-      master: `Sin guía. Orden y sentido de cada trazo. Hace falta ${config.threshold}.`,
+      apprentice: `Guía visible y trazos corregidos del todo. Da igual el orden de los trazos. Hace falta ${config.threshold} de precisión.`,
+      artisan: `Guía tenue y corrección de los trazos hasta el 60 %. Respeta el orden y el número de trazos. Hace falta ${config.threshold}.`,
+      master: `Sin guía y corrección de los trazos hasta el 30 %. Orden y sentido de cada trazo. Hace falta ${config.threshold}.`,
     };
     /** @type {HTMLElement} */ (this.querySelector('.levels__help')).textContent = help[this.#level];
   }
@@ -165,6 +165,8 @@ export class VistaPracticaGlifo extends HTMLElement {
       level: this.#level,
     });
     this.#refreshSeals();
+    const firstIssue = result.issues[0]?.message ?? '';
+    this.#station.announce(result.passed ? `${result.summary} Precisión ${result.score}.` : `Aún no: ${result.score} de ${result.threshold}. ${firstIssue}`);
     if (!result.passed) return;
 
     if (result.transform) await this.#station.activate(glyph, result.transform, { score: result.score });

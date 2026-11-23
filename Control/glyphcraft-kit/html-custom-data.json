@@ -218,6 +218,14 @@
         {
           "name": "readonly",
           "description": "Impide añadir trazos."
+        },
+        {
+          "name": "auto-correct",
+          "description": "Al terminar cada trazo (de la mano o del puntero), lo convierte en la figura que se quería hacer —círculo, línea, polígono regular, estrella, onda, espiral…— con una breve animación."
+        },
+        {
+          "name": "correction",
+          "description": "Intensidad de la corrección (0-1): 1 = la figura perfecta, 0,5 = a medio camino. Por defecto `1`."
         }
       ]
     },

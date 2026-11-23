@@ -365,6 +365,8 @@ Clase: `GcLienzoGlifo` · Fuente: `componentes/lienzo-glifo/lienzo-glifo.js`
 | `max-strokes` | `number` | Máximo de trazos (1-200). Por defecto `32`. |
 | `pointer-input` | `boolean` | Permite dibujar con ratón o pantalla táctil. |
 | `readonly` | `boolean` | Impide añadir trazos. |
+| `auto-correct` | `boolean` | Al terminar cada trazo (de la mano o del puntero), lo convierte en la figura que se quería hacer —círculo, línea, polígono regular, estrella, onda, espiral…— con una breve animación. |
+| `correction` | `number` | Intensidad de la corrección (0-1): 1 = la figura perfecta, 0,5 = a medio camino. Por defecto `1`. |
 
 ### Propiedades
 
@@ -377,6 +379,9 @@ Clase: `GcLienzoGlifo` · Fuente: `componentes/lienzo-glifo/lienzo-glifo.js`
 | `readonly` | `boolean` | Impide añadir trazos. Refleja el atributo `readonly`. |
 | `guideStyle` | `'ghost' \| 'faint' \| 'none'` | Visibilidad de la guía. Por defecto `ghost`. Refleja el atributo `guide-style`. |
 | `guideNext` | `boolean` | Resalta en la guía el siguiente trazo que toca dibujar. Refleja el atributo `guide-next`. |
+| `autoCorrect` | `boolean` | Al terminar cada trazo (de la mano o del puntero), lo convierte en la figura que se quería hacer —círculo, línea, polígono regular, estrella, onda, espiral…— con una breve animación. |
+| `correction` | `number` | Intensidad de la corrección (0-1). |
+| `templates` | `SymbolTemplate[]` | (Diseño) Símbolos a los que se ajustan los trazos con `auto-correct` (ver `templatesFromGlyphs`): una luna mal hecha se vuelve la luna exacta del glifo. |
 | `guide` | `{ x: number, y: number }[][] \| null` | (Diseño) Trazos modelo que se muestran como guía. |
 | `feedback` | `StrokeGrade[]` | (Ejecución) Corrección por trazo: colorea cada trazo. Se borra al cambiar los trazos. |
 | `strokes` | `Stroke[]` | (Solo lectura) Copia de los trazos terminados. |
@@ -393,6 +398,7 @@ Clase: `GcLienzoGlifo` · Fuente: `componentes/lienzo-glifo/lienzo-glifo.js`
 | `cancelStroke()` |  |  | Descarta el trazo en curso sin guardarlo. |
 | `undo()` |  | `boolean` | Elimina el último trazo. |
 | `clear()` | { animated = true }: , options?: { animated?: boolean } | `Promise<boolean>` | Borra todos los trazos, con un desvanecimiento opcional. Emite `glyph-clearing` antes (cancelable) y `glyph-cleared` después. |
+| `eraseInside()` | polygon: { x: number, y: number }[], options?: { threshold?: number, accumulate?: boolean } | `number` | Borra solo los trazos que quedan bajo una zona (por ejemplo, la palma de la mano), con un breve desvanecimiento. |
 | `loadStrokes()` | strokes: Stroke[] |  | Sustituye los trazos (por ejemplo, para restaurar un dibujo guardado). |
 | `toJSON()` |  |  | Datos serializables del dibujo. |
 
@@ -402,7 +408,9 @@ Clase: `GcLienzoGlifo` · Fuente: `componentes/lienzo-glifo/lienzo-glifo.js`
 |---|---|---|
 | `drawing-started` | `CustomEvent<{point: StrokePoint, source: StrokeSource}>` | Empieza un trazo. |
 | `drawing-ended` | `CustomEvent<{stroke: Stroke \| null, accepted: boolean, index: number}>` | Termina un trazo (rechazado si es demasiado corto). |
+| `stroke-corrected` | `CustomEvent<{index: number, shape: string}>` | Un trazo se ha convertido en su figura ideal (`auto-correct`). |
 | `strokes-changed` | `CustomEvent<{count: number}>` | Cambia el número de trazos. |
+| `strokes-erased` | `CustomEvent<{count: number, indices: number[]}>` | Se han borrado los trazos que había bajo una zona (`eraseInside`). |
 | `glyph-clearing` | `CustomEvent<{count: number}>` | Va a borrarse todo. **Cancelable** con `preventDefault()`. |
 | `glyph-cleared` | `CustomEvent<{count: number}>` | Se ha borrado todo. |
 
@@ -796,7 +804,7 @@ Clase: `GcEscenarioHechizo` · Fuente: `componentes/escenario-hechizo/escenario-
 
 | Método | Parámetros | Devuelve | Descripción |
 |---|---|---|---|
-| `cast()` | spellId: string \| string[], { x = 0.5, y = 0.5, radius = 0.4, strokes = [], intensity = 1, stability = 1 }: , options?: CastOptions | `Promise<boolean>` | Lanza un hechizo (o varios combinados) sobre el glifo dibujado. Con varios hechizos la activación es única (con el color del primero) y todos los efectos estallan a la vez: así se combinan en el laboratorio. |
+| `cast()` | spellId: string \| string[], { x = 0.5, y = 0.5, radius = 0.4, strokes = [], intensity = 1, stability = 1, power = 1 }: , options?: CastOptions | `Promise<boolean>` | Lanza un hechizo (o varios combinados) sobre el glifo dibujado. Con varios hechizos la activación es única (con el color del primero) y todos los efectos estallan a la vez: así se combinan en el laboratorio. |
 | `clear()` |  |  | Detiene y elimina todos los efectos en curso. |
 
 ### Eventos

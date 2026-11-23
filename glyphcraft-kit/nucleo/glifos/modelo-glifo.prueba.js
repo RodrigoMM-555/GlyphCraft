@@ -50,7 +50,7 @@ describe('createGlyph', () => {
     }).toThrow();
   });
 
-  it('los seis glifos del grimorio inicial son válidos', () => {
+  it('los glifos del grimorio inicial son válidos', () => {
     expect(() => STARTER_GLYPHS.forEach((def) => createGlyph(def))).not.toThrow();
   });
 
@@ -79,11 +79,11 @@ describe('BibliotecaGlifos', () => {
     const onChange = vi.fn();
     library.addEventListener('change', onChange);
     library.add(...[...STARTER_GLYPHS].reverse());
-    expect(library.size).toBe(6);
+    expect(library.size).toBe(STARTER_GLYPHS.length);
     expect(library.get('aqua')?.name).toBe('Aqua');
     expect(library.get('nada')).toBeNull();
     expect(library.list()[0].id).toBe('ignis');
-    expect(onChange.mock.calls[0][0].detail.ids).toHaveLength(6);
+    expect(onChange.mock.calls[0][0].detail.ids).toHaveLength(STARTER_GLYPHS.length);
     library.clear();
     expect(library.has('aqua')).toBe(false);
   });

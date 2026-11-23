@@ -19,7 +19,7 @@ class Banco {
   constructor(config) {
     this.engine = new MotorGestos(config);
     const types = ['gesture-changed', 'draw-start', 'draw-move', 'draw-end', 'erase-progress', 'erase',
-      'seal-progress', 'seal', 'pointer-move', 'hands-changed'];
+      'seal-progress', 'seal', 'pointer-move', 'hands-changed', 'erase-move'];
     for (const type of types) {
       this.engine.addEventListener(type, (e) => this.events.push({ type, detail: /** @type {CustomEvent} */ (e).detail }));
     }
@@ -313,5 +313,97 @@ describe('MotorGestos · sellar con el puño bien cerrado', () => {
     expect(snapshot.hands[0]).toMatchObject({ id: 'Right', state: 'drawing', frameIndex: 0 });
     snapshot.hands[0].point = null;
     expect(bench.engine.getSnapshot().hands[0].point).not.toBeNull();
+  });
+});
+
+describe('MotorGestos · saltos del índice', () => {
+  /**
+   * Mano señalando con algunos puntos desplazados (simula errores del detector).
+   * @param {number} x
+   * @param {number} y
+   * @param {number[]} landmarks Índices de los puntos que se desplazan.
+   * @param {number} dx
+   */
+  const glitched = (x, y, landmarks, dx) => {
+    const hand = createSyntheticHand({ pose: 'point', x, y });
+    for (const i of landmarks) hand.landmarks[i] = { ...hand.landmarks[i], x: hand.landmarks[i].x + dx };
+    return hand;
+  };
+
+  it('una punta del índice incoherente con el dedo se corrige prolongando el dedo', () => {
+    bench.feed('point', 3, { x: 0.4, y: 0.4 });
+    bench.feedHands([glitched(0.4, 0.4, [8], 0.3)]); // solo la punta, muy lejos
+    expect(Math.abs(bench.last('draw-move').point.x - 0.4)).toBeLessThan(0.03);
+    expect(bench.count('draw-end')).toBe(0);
+  });
+
+  it('un salto imposible del dedo (sin que se mueva la palma) se descarta', () => {
+    bench.feed('point', 3, { x: 0.4, y: 0.4 });
+    const moves = bench.count('draw-move');
+    bench.feedHands([glitched(0.4, 0.4, [5, 6, 7, 8], 0.3)], 2); // todo el índice desplazado 2 fotogramas
+    expect(bench.count('draw-move')).toBe(moves);
+    bench.feed('point', 2, { x: 0.41, y: 0.4 });
+    expect(bench.last('draw-move').point.x).toBeLessThan(0.45);
+    expect(bench.count('draw-end')).toBe(0);
+  });
+
+  it('si el «salto» se mantiene, es real: se acepta tras unos fotogramas', () => {
+    bench.feed('point', 3, { x: 0.4, y: 0.4 });
+    bench.feedHands([glitched(0.4, 0.4, [5, 6, 7, 8], 0.3)], 6);
+    expect(bench.last('draw-move').point.x).toBeGreaterThan(0.45);
+  });
+
+  it('al doblar el dedo para terminar, el trazo no hace un «gancho»', () => {
+    bench.feed('point', 2, { x: 0.4, y: 0.4 });
+    for (let i = 1; i <= 6; i++) bench.feed('point', 1, { x: 0.4 + i * 0.02, y: 0.4 });
+    // El dedo se dobla: la punta baja hacia la palma durante varios fotogramas.
+    for (let i = 1; i <= 5; i++) bench.feed('relaxed', 1, { x: 0.52, y: 0.4 + i * 0.02 });
+    expect(bench.last('draw-end').reason).toBe('released');
+    const ys = bench.events.filter((e) => e.type === 'draw-move').map((e) => e.detail.point.y);
+    expect(Math.max(...ys)).toBeLessThan(0.41);
+  });
+
+  it('si el gesto se recupera, los puntos retenidos sí se dibujan', () => {
+    bench.feed('point', 3, { x: 0.4, y: 0.4 });
+    const before = bench.count('draw-move');
+    bench.feed('point-relaxed', 0).feed('relaxed', 2, { x: 0.42, y: 0.4 }).feed('point', 1, { x: 0.44, y: 0.4 });
+    expect(bench.count('draw-move')).toBe(before + 3);
+    expect(bench.count('draw-end')).toBe(0);
+  });
+
+  it('una detección falsa cerca de la mano que dibuja no le roba el trazo', () => {
+    bench.feed('point', 3, { x: 0.5, y: 0.5 });
+    const fake = createSyntheticHand({ pose: 'point', x: 0.66, y: 0.5 });
+    const real = createSyntheticHand({ pose: 'point', x: 0.51, y: 0.5 });
+    bench.clear();
+    bench.feedHands([fake, real], 3); // la falsa llega primera en el fotograma
+    const real0 = bench.events.find((e) => e.type === 'draw-move')?.detail.hand;
+    const moves = bench.events.filter((e) => e.type === 'draw-move' && e.detail.hand === real0);
+    // El trazo que ya existía sigue a la mano real (no salta a la falsa).
+    expect(moves.every((e) => e.detail.point.x < 0.53)).toBe(true);
+    expect(moves.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('MotorGestos · borrar lo que cubre la mano', () => {
+  it('erase incluye el contorno de la mano y su palma', () => {
+    bench.feed('open', 30, { x: 0.5, y: 0.5 });
+    const erase = bench.last('erase');
+    expect(erase.outline.length).toBeGreaterThanOrEqual(5);
+    expect(erase.palm.x).toBeGreaterThan(0.3);
+    const xs = erase.outline.map((/** @type {{ x: number }} */ p) => p.x);
+    expect(Math.min(...xs)).toBeLessThan(erase.palm.x);
+    expect(Math.max(...xs)).toBeGreaterThan(erase.palm.x);
+  });
+
+  it('después de borrar, la mano abierta sigue borrando por donde pasa (esponja)', () => {
+    bench.feed('open', 30, { x: 0.4 });
+    expect(bench.count('erase')).toBe(1);
+    bench.feed('open', 3, { x: 0.45 });
+    expect(bench.count('erase-move')).toBeGreaterThanOrEqual(3);
+    bench.feed('relaxed', 2);
+    const moves = bench.count('erase-move');
+    bench.feed('relaxed', 3);
+    expect(bench.count('erase-move')).toBe(moves);
   });
 });

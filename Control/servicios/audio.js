@@ -109,6 +109,20 @@ export class ServicioAudio {
       case 'ice':
         [2093, 2637, 3136, 2349, 2794].forEach((f, i) => this.#tone(f, t + i * 0.13, { duration: 0.35, gain: 0.03, type: 'triangle' }));
         break;
+      case 'lightning':
+        // Chasquidos secos y un trueno grave
+        for (let i = 0; i < 6; i++) this.#noiseBurst(t + i * 0.35 + Math.random() * 0.1, { duration: 0.12, gain: 0.2, filter: 'highpass', freq: 1800 });
+        this.#noiseBurst(t + 0.1, { duration: 2.2, gain: 0.18, filter: 'lowpass', freq: 160, sweepTo: 60 });
+        break;
+      case 'earth':
+        this.#tone(55, t, { duration: 1.6, gain: 0.2, type: 'sawtooth', lowpass: 220 });
+        this.#noiseBurst(t, { duration: 1.4, gain: 0.16, filter: 'lowpass', freq: 300 });
+        break;
+      case 'shadow':
+        this.#tone(98, t, { duration: 2.6, gain: 0.1, glideTo: 49, lowpass: 600 });
+        this.#tone(146.8, t + 0.2, { duration: 2.2, gain: 0.05, type: 'triangle', glideTo: 73.4 });
+        this.#noiseBurst(t, { duration: 2.6, gain: 0.08, filter: 'bandpass', freq: 900, sweepTo: 200, q: 4 });
+        break;
     }
   }
 

@@ -18,6 +18,11 @@ const ENTRIES = [
 export class VistaMenu extends HTMLElement {
   connectedCallback() {
     if (this.childElementCount) return;
+    this.addEventListener('click', (event) => {
+      if (/** @type {HTMLElement} */ (event.target).closest('[data-help]')) {
+        /** @type {HTMLDialogElement | null} */ (document.querySelector('.help-dialog'))?.showModal();
+      }
+    });
     this.className = 'view view--menu';
     this.innerHTML = `
       <div class="menu">
@@ -40,6 +45,7 @@ export class VistaMenu extends HTMLElement {
       </div>
       <p class="menu__footer">
         Dibuja con el índice frente a la cámara o con el ratón · <kbd>Esc</kbd> vuelve al menú ·
+        <button type="button" class="link-button" data-help>Ayuda y atajos (<kbd>?</kbd>)</button> ·
         <a href="catalogo.html">Catálogo de componentes</a>
       </p>`;
   }

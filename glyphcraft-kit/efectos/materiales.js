@@ -156,12 +156,36 @@ export function rayMaterial(color) {
  * Cristal de hielo con facetas y borde luminoso. Admite `InstancedMesh`.
  */
 export function iceMaterial() {
+  return facetedMaterial({ shadow: [0.35, 0.65, 0.95], light: [0.9, 0.98, 1], rim: [0.6, 0.9, 1], alpha: 0.55 });
+}
+
+/**
+ * Roca con facetas (tierra). Admite `InstancedMesh`.
+ * @param {{ shadow?: RGB, light?: RGB, rim?: RGB }} [colors]
+ */
+export function rockMaterial({ shadow = [0.18, 0.12, 0.08], light = [0.62, 0.48, 0.32], rim = [0.9, 0.55, 0.25] } = {}) {
+  return facetedMaterial({ shadow, light, rim, alpha: 0.95, rimStrength: 0.35 });
+}
+
+/**
+ * Material sólido con facetas: cada cara recibe un tono según su
+ * orientación (sin luces de la escena) y un borde luminoso.
+ * @param {{ shadow: RGB, light: RGB, rim: RGB, alpha: number, rimStrength?: number }} options
+ */
+export function facetedMaterial({ shadow, light, rim, alpha, rimStrength = 1 }) {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: true,
     premultipliedAlpha: true,
     blending: THREE.NormalBlending,
-    uniforms: { uOpacity: { value: 1 } },
+    uniforms: {
+      uOpacity: { value: 1 },
+      uShadow: { value: new THREE.Vector3(...shadow) },
+      uLight: { value: new THREE.Vector3(...light) },
+      uRim: { value: new THREE.Vector3(...rim) },
+      uAlpha: { value: alpha },
+      uRimStrength: { value: rimStrength },
+    },
     vertexShader: /* glsl */ `
       varying vec3 vNormal;
       varying vec3 vView;
@@ -179,6 +203,11 @@ export function iceMaterial() {
       }`,
     fragmentShader: /* glsl */ `
       uniform float uOpacity;
+      uniform vec3 uShadow;
+      uniform vec3 uLight;
+      uniform vec3 uRim;
+      uniform float uAlpha;
+      uniform float uRimStrength;
       varying vec3 vNormal;
       varying vec3 vView;
       void main() {
@@ -187,8 +216,43 @@ export function iceMaterial() {
         float fresnel = pow(1.0 - facing, 2.0);
         // Facetas: cada cara recibe un tono según su orientación
         float facet = 0.55 + 0.45 * dot(n, normalize(vec3(-0.4, 0.7, 0.6)));
-        vec3 col = mix(vec3(0.35, 0.65, 0.95), vec3(0.9, 0.98, 1.0), facet) + fresnel * vec3(0.6, 0.9, 1.0);
-        float a = (0.55 + 0.4 * fresnel) * uOpacity;
+        vec3 col = mix(uShadow, uLight, facet) + fresnel * uRim * uRimStrength;
+        float a = min(1.0, uAlpha + 0.4 * fresnel) * uOpacity;
+        gl_FragColor = vec4(col * a, a);
+      }`,
+  });
+}
+
+/**
+ * Disco oscuro de borde difuso (eclipses, vórtices de sombra). Se usa sobre
+ * un `PlaneGeometry(2, 2)` y oscurece lo que hay detrás.
+ * @param {RGB} rim Color del halo del borde.
+ */
+export function darkDiscMaterial(rim) {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    premultipliedAlpha: true,
+    blending: THREE.NormalBlending,
+    side: THREE.DoubleSide,
+    uniforms: { uOpacity: { value: 1 }, uTime: { value: 0 }, uRim: { value: new THREE.Vector3(...rim) } },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */ `
+      uniform float uOpacity;
+      uniform float uTime;
+      uniform vec3 uRim;
+      varying vec2 vUv;
+      void main() {
+        vec2 p = vUv - 0.5;
+        float d = length(p) * 2.0;
+        float angle = atan(p.y, p.x);
+        float wobble = 0.03 * sin(angle * 7.0 + uTime * 3.0);
+        float core = smoothstep(0.78 + wobble, 0.6, d);
+        float halo = exp(-pow((d - 0.8 - wobble) / 0.09, 2.0));
+        vec3 col = uRim * halo * 1.4;
+        float a = max(core * 0.92, halo * 0.8) * uOpacity;
         gl_FragColor = vec4(col * a, a);
       }`,
   });

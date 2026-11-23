@@ -1,6 +1,8 @@
-import { ReconocedorGlifos, glyphLibrary } from 'glyphcraft-kit/nucleo';
+import { ReconocedorGlifos, glyphLibrary, detectElements } from 'glyphcraft-kit/nucleo';
 import { viewHeader } from '../marco-vista.js';
 import { settings, progressStore, audio, sigmaFromTolerance } from '../../servicios/servicios-app.js';
+import { glyphPower, powerLabel, spellsFor } from '../../servicios/hechizos.js';
+import { NAMED_COMBINATIONS } from '../../servicios/logros.js';
 
 /** @typedef {import('./estacion-lanzamiento.js').EstacionLanzamiento} EstacionLanzamiento */
 /** @typedef {import('glyphcraft-kit').GcGlifo} GcGlifo */
@@ -12,6 +14,12 @@ import { settings, progressStore, audio, sigmaFromTolerance } from '../../servic
  *
  * Se dibuja sin guía; al sellar, el reconocedor busca cuál de los glifos
  * del grimorio se ha trazado. Solo se pueden lanzar los glifos aprendidos.
+ *
+ * Si el dibujo no es un glifo suelto, se busca una **combinación**: dos o
+ * tres símbolos aprendidos dentro del mismo círculo lanzan su hechizo
+ * combinado (como en el laboratorio).
+ *
+ * La potencia depende del tamaño del círculo: cuanto más grande, más fuerte.
  */
 export class VistaPractica extends HTMLElement {
   /** @type {EstacionLanzamiento} */ #station = /** @type {any} */ (null);
@@ -36,12 +44,13 @@ export class VistaPractica extends HTMLElement {
       ${viewHeader({
         kicker: 'Círculo de lanzamiento',
         title: 'Practicar magia',
-        intro: 'Traza de memoria cualquiera de los glifos que hayas aprendido y séllalo: el círculo lo reconocerá.',
+        intro:
+          'Traza de memoria un glifo aprendido —o combina dos dentro del mismo círculo— y séllalo. Cuanto más grande el círculo, más poderoso el hechizo.',
       })}
       <gc-casting-station></gc-casting-station>`;
     this.#station = /** @type {EstacionLanzamiento} */ (this.querySelector('gc-casting-station'));
     this.#station.extras.innerHTML = `
-      <section class="cast-result" hidden aria-live="polite">
+      <section class="cast-result" hidden aria-label="Resultado del lanzamiento">
         <gc-glyph class="cast-result__glyph" size="72"></gc-glyph>
         <div>
           <p class="kicker cast-result__kicker"></p>
@@ -49,6 +58,7 @@ export class VistaPractica extends HTMLElement {
           <p class="cast-result__message"></p>
         </div>
         <gc-arcane-meter class="cast-result__score" label="Precisión"></gc-arcane-meter>
+        <p class="cast-result__power" hidden></p>
       </section>
       <div class="cast-known"></div>`;
   }
@@ -72,6 +82,24 @@ export class VistaPractica extends HTMLElement {
       /** @type {HTMLElement} */ (li.querySelector('span')).textContent = glyph.name;
       list.append(li);
     }
+
+    // Combinaciones con nombre que ya se pueden lanzar (todos sus glifos aprendidos).
+    const learnedIds = new Set(learned.map((g) => g.id));
+    const combos = Object.entries(NAMED_COMBINATIONS).filter(([id]) => id.split('+').every((g) => learnedIds.has(g)));
+    if (!combos.length) return;
+    const details = document.createElement('details');
+    details.className = 'cast-combos';
+    details.innerHTML = `<summary>Combinaciones disponibles (${combos.length})</summary><ul></ul>`;
+    const ul = /** @type {HTMLElement} */ (details.querySelector('ul'));
+    for (const [id, combo] of combos) {
+      const li = document.createElement('li');
+      const parts = id.split('+').map((g) => glyphLibrary.get(g)?.name ?? g).join(' + ');
+      li.innerHTML = '<strong></strong> <span></span>';
+      /** @type {HTMLElement} */ (li.querySelector('strong')).textContent = combo.name;
+      /** @type {HTMLElement} */ (li.querySelector('span')).textContent = `· ${parts}`;
+      ul.append(li);
+    }
+    known.append(details);
   }
 
   /** @param {Event} event */
@@ -85,8 +113,15 @@ export class VistaPractica extends HTMLElement {
     const $ = (/** @type {string} */ s) => /** @type {HTMLElement} */ (panel.querySelector(s));
     const meter = /** @type {GcMedidorArcano} */ ($('.cast-result__score'));
     panel.hidden = false;
+    $('.cast-result__power').hidden = true;
 
     if (!result.passed) {
+      // ¿Es una combinación de varios símbolos en el mismo círculo?
+      const combination = detectElements(strokes, glyphLibrary.list());
+      if (combination.elements.length >= 2 && combination.transform) {
+        await this.#castCombination(combination.elements, combination.transform);
+        return;
+      }
       audio.play('fail');
       panel.dataset.outcome = 'fail';
       /** @type {GcGlifo} */ ($('.cast-result__glyph')).glyph = null;
@@ -95,6 +130,7 @@ export class VistaPractica extends HTMLElement {
       $('.cast-result__message').textContent =
         result.score > 35 ? `Se parece un poco a ${glyph.name}. ${result.summary}` : result.summary;
       meter.setValue(result.score);
+      this.#station.announce(`Sin respuesta. ${$('.cast-result__message').textContent}`);
       return;
     }
 
@@ -111,6 +147,7 @@ export class VistaPractica extends HTMLElement {
         Object.assign(document.createElement('a'), { href: `#/grimoire/${glyph.id}`, textContent: 'Estúdialo en el grimorio.' }),
       );
       this.#station.setFeedback(result.strokes.map((s) => s.grade));
+      this.#station.announce(`Reconozco ${glyph.name}, pero aún no lo has aprendido.`);
       return;
     }
 
@@ -118,6 +155,53 @@ export class VistaPractica extends HTMLElement {
     $('.cast-result__kicker').textContent = 'Hechizo lanzado';
     $('.cast-result__message').textContent = result.summary;
     progressStore.recordCast(glyph.id);
-    if (result.transform) await this.#station.activate(glyph, result.transform, { score: result.score });
+    if (!result.transform) return;
+    const power = glyphPower(result.transform.r);
+    this.#showPower(power);
+    this.#station.announce(`${glyph.name} lanzado. Precisión ${result.score}. Potencia ${powerLabel(power).toLowerCase()}.`);
+    await this.#station.activate(glyph, result.transform, { score: result.score, power });
   };
+
+  /**
+   * Lanza una combinación de glifos (solo si todos están aprendidos).
+   * @param {import('glyphcraft-kit/nucleo').Glyph[]} glyphs
+   * @param {{ cx: number, cy: number, r: number }} transform
+   */
+  async #castCombination(glyphs, transform) {
+    const panel = /** @type {HTMLElement} */ (this.querySelector('.cast-result'));
+    const $ = (/** @type {string} */ s) => /** @type {HTMLElement} */ (panel.querySelector(s));
+    const names = glyphs.map((g) => g.name).join(' + ');
+    const { spells, combo } = spellsFor(glyphs);
+    /** @type {GcGlifo} */ ($('.cast-result__glyph')).glyph = glyphs[0];
+    /** @type {GcMedidorArcano} */ ($('.cast-result__score')).setValue(85);
+    $('.cast-result__name').textContent = combo?.name ?? names;
+
+    const missing = glyphs.filter((g) => !progressStore.isLearned(g.id));
+    if (missing.length) {
+      audio.play('fail');
+      panel.dataset.outcome = 'unlearned';
+      $('.cast-result__kicker').textContent = 'Combinación reconocida';
+      $('.cast-result__message').textContent = `Para lanzarla aquí, aprende antes ${missing.map((g) => g.name).join(' y ')}. En el laboratorio puedes probarla sin aprender.`;
+      this.#station.announce(`Combinación ${names} reconocida, pero falta aprender ${missing.map((g) => g.name).join(' y ')}.`);
+      return;
+    }
+
+    panel.dataset.outcome = 'cast';
+    $('.cast-result__kicker').textContent = combo ? 'Hechizo combinado' : 'Fusión arcana';
+    $('.cast-result__message').textContent = combo ? `${names}. ${combo.text}` : `${names}: una mezcla sin nombre.`;
+    glyphs.forEach((g) => progressStore.recordCast(g.id));
+    if (combo) progressStore.recordDiscovery(combo.id);
+    const power = glyphPower(transform.r);
+    this.#showPower(power);
+    this.#station.announce(`${combo?.name ?? 'Fusión arcana'} lanzado: ${names}. Potencia ${powerLabel(power).toLowerCase()}.`);
+    await this.#station.activate(glyphs, transform, { score: 85, spells, power });
+  }
+
+  /** @param {number} power */
+  #showPower(power) {
+    const label = /** @type {HTMLElement} */ (this.querySelector('.cast-result__power'));
+    label.hidden = false;
+    label.textContent = `Potencia ${powerLabel(power).toLowerCase()} · ${Math.round(power * 100)} %`;
+    label.dataset.level = power >= 1.5 ? 'high' : power < 0.9 ? 'low' : 'normal';
+  }
 }

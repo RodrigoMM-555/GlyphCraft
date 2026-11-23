@@ -13,6 +13,8 @@ import { glyphLibrary } from 'glyphcraft-kit/nucleo';
 import { STARTER_GLYPHS } from 'glyphcraft-kit/glifos';
 
 import { Aplicacion } from './nucleo/aplicacion.js';
+import { settings } from './servicios/servicios-app.js';
+import { startAccessibility } from './servicios/accesibilidad.js';
 import { VistaMenu } from './vistas/menu/vista-menu.js';
 import { EstacionLanzamiento } from './vistas/practica/estacion-lanzamiento.js';
 import { VistaPractica } from './vistas/practica/vista-practica.js';
@@ -21,6 +23,10 @@ import { VistaPracticaGlifo } from './vistas/grimorio/vista-practica-glifo.js';
 import { VistaLaboratorio } from './vistas/laboratorio/vista-laboratorio.js';
 import { VistaProgreso } from './vistas/progreso/vista-progreso.js';
 import { VistaAjustes } from './vistas/ajustes/vista-ajustes.js';
+
+// Accesibilidad antes de crear nada: el ajuste de movimiento reducido debe
+// estar aplicado cuando los componentes consulten matchMedia.
+startAccessibility(settings);
 
 // El catálogo de glifos (datos) se registra antes de crear ninguna vista.
 glyphLibrary.add(...STARTER_GLYPHS);

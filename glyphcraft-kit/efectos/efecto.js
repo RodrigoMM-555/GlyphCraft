@@ -12,6 +12,7 @@ import { SistemaParticulas } from './particulas.js';
  * @property {THREE.Vector3[][]} strokes Trazos dibujados, en el mundo 3D.
  * @property {number} intensity 0-1: más precisión → hechizo más potente.
  * @property {number} stability 0-1: poca precisión → el efecto parpadea.
+ * @property {number} [power] Potencia por el tamaño del glifo (1 = normal, hasta 2): más partículas y más alcance.
  * @property {number} density Multiplicador de partículas según la calidad.
  * @property {THREE.Uniform<number>} sizeScale Uniform compartido de tamaño de partícula.
  * @property {RGB} color Color principal del hechizo.
@@ -150,7 +151,7 @@ export function onSphere(radius, front = false) {
  * @param {number} base
  */
 export function amount(ctx, base) {
-  return Math.max(1, Math.round(base * ctx.density * (0.6 + 0.4 * ctx.intensity)));
+  return Math.max(1, Math.round(base * ctx.density * (0.6 + 0.4 * ctx.intensity) * (ctx.power ?? 1)));
 }
 
 /**

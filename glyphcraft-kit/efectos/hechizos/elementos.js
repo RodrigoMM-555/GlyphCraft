@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { Efecto, particles, amount, rand, inDisk, onSphere } from '../efecto.js';
-import { ringMaterial, shellMaterial, rayMaterial, iceMaterial } from '../materiales.js';
+import { ringMaterial, shellMaterial, rayMaterial, iceMaterial, rockMaterial } from '../materiales.js';
+import { bolt, glow, shockRing, cloud, shards, sparks, rim, darkDisc, column } from './piezas.js';
 
 /**
- * Hechizos de los seis elementos. Cada función recibe el contexto del
+ * Hechizos de los nueve elementos. Cada función recibe el contexto del
  * lanzamiento y devuelve un `Efecto`. Escalan con:
  * - `radius`: el tamaño del círculo dibujado;
  * - `intensity`: la precisión (más partículas, más alto, más brillante);
@@ -466,5 +467,109 @@ export function ice(ctx) {
       fadeOut: 0.6,
     }),
   );
+  return effect;
+}
+
+// ── Rayo: relámpagos que caen sobre el glifo y arcos por el borde ──
+/** @param {SpellContext} ctx */
+export function lightning(ctx) {
+  const effect = new Efecto();
+  const [ox, oy, oz] = at(ctx);
+  const r = ctx.radius;
+  const strikes = Math.round(4 + ctx.intensity * 3 * (ctx.power ?? 1));
+  const colors = /** @type {[number, number, number][]} */ ([[1, 1, 1], [0.8, 0.85, 1], [0.55, 0.5, 1]]);
+  for (let i = 0; i < strikes; i++) {
+    const [dx, dy] = inDisk(r * 0.35);
+    bolt(effect, ctx, [ox + rand(-0.8, 0.8) * r, oy + r * 2.6, oz], [ox + dx, oy + dy, oz], {
+      colors,
+      start: 0.1 + i * rand(0.28, 0.42),
+      width: 1.2,
+      branches: 3,
+    });
+  }
+  // Arcos que recorren el borde del círculo
+  for (let i = 0; i < 6; i++) {
+    const a = rand(0, Math.PI * 2);
+    const b = a + rand(0.6, 1.2);
+    bolt(effect, ctx, [ox + Math.cos(a) * r, oy + Math.sin(a) * r, oz], [ox + Math.cos(b) * r, oy + Math.sin(b) * r, oz], {
+      colors,
+      start: rand(0, 2.4),
+      width: 0.6,
+      branches: 0,
+      flash: false,
+      roughness: 0.35,
+    });
+  }
+  glow(effect, ctx, { colors: [[0.9, 0.95, 1], [0.6, 0.6, 1], [0.35, 0.3, 0.9]], size: 2.2, life: 2.8, flicker: 0.8 });
+  sparks(effect, ctx, { count: 160, colors, until: 2.4, speed: [1, 3] });
+  shockRing(effect, ctx, { color: [0.6, 0.7, 1], start: 0.15, duration: 0.7 });
+  return effect;
+}
+
+// ── Tierra: espolones de roca que brotan, cascotes y polvo ──────
+/** @param {SpellContext} ctx */
+export function earth(ctx) {
+  const effect = new Efecto();
+  const [ox, oy] = at(ctx);
+  const r = ctx.radius;
+  shards(effect, ctx, { material: rockMaterial(), count: 16, length: [0.5, 1.2], width: [0.25, 0.4], from: 'rim', rimRadius: 0.55, tilt: [0.4, 1.6], sides: 4, grow: 0.35 });
+  shards(effect, ctx, { material: rockMaterial({ light: [0.75, 0.6, 0.4] }), count: 5, length: [0.9, 1.5], width: [0.35, 0.5], tilt: [1.2, 2.4], sides: 5, grow: 0.2 });
+  // Cascotes que saltan y caen
+  effect.addParticles(
+    particles(ctx, {
+      count: amount(ctx, 160),
+      emit: () => {
+        const a = Math.random() * Math.PI * 2;
+        const v = r * rand(1, 2.4);
+        return {
+          position: [ox + Math.cos(a) * r * 0.4, oy + Math.sin(a) * r * 0.4, 0],
+          velocity: [Math.cos(a) * v * 0.6, v, rand(0.2, 0.8) * r],
+          delay: rand(0, 0.6),
+          life: rand(0.9, 1.5),
+          size: r * rand(0.05, 0.11),
+        };
+      },
+      colors: [[0.75, 0.6, 0.42], [0.5, 0.38, 0.25], [0.3, 0.22, 0.15]],
+      gravity: [0, -r * 5, 0],
+      drag: 0.3,
+      blending: 'normal',
+    }),
+  );
+  cloud(effect, ctx, { count: 70, colors: [[0.55, 0.45, 0.35], [0.45, 0.38, 0.3], [0.35, 0.3, 0.25]], area: [1.1, 0.5], drift: [0, 0.25, 0], until: 1.6, opacity: 0.3 });
+  shockRing(effect, ctx, { color: [0.85, 0.6, 0.3], duration: 0.8, to: 2.6 });
+  return effect;
+}
+
+// ── Sombra: vórtice oscuro que absorbe la luz ────────────────────
+/** @param {SpellContext} ctx */
+export function shadow(ctx) {
+  const effect = new Efecto();
+  const [ox, oy, oz] = at(ctx);
+  const r = ctx.radius;
+  darkDisc(effect, ctx, { rim: [0.55, 0.3, 0.95], size: 0.9, duration: 3.4 });
+  // Jirones de oscuridad que giran hacia el centro
+  effect.addParticles(
+    particles(ctx, {
+      count: amount(ctx, 520),
+      emit: () => {
+        const a = Math.random() * Math.PI * 2;
+        const d = r * rand(1, 1.9);
+        return {
+          position: [ox + Math.cos(a) * d, oy + Math.sin(a) * d, oz + rand(-0.1, 0.1)],
+          delay: rand(0, 2.4),
+          life: rand(0.9, 1.4),
+          size: r * rand(0.12, 0.25),
+        };
+      },
+      colors: [[0.12, 0.05, 0.2], [0.06, 0.02, 0.1], [0.02, 0.0, 0.04]],
+      attract: { target: [ox, oy, oz], start: 0, end: 3, twist: 2.2 },
+      opacity: 0.55,
+      blending: 'normal',
+      fadeIn: 0.3,
+      fadeOut: 0.3,
+    }),
+  );
+  rim(effect, ctx, { count: 260, colors: [[0.85, 0.6, 1], [0.55, 0.3, 0.95], [0.3, 0.1, 0.6]], radius: 0.95, rise: 0, out: -0.4, swirl: -2.5, size: [0.03, 0.07], flicker: 0.6 });
+  column(effect, ctx, { count: 50, colors: [[0.3, 0.15, 0.45], [0.15, 0.06, 0.25], [0.05, 0.02, 0.1]], height: 1.6, width: 0.6, blending: 'normal', opacity: 0.4, size: [0.25, 0.45], growth: 1.8, until: 2.2 });
   return effect;
 }

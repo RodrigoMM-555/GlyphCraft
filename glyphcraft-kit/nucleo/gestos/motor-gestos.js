@@ -78,10 +78,22 @@ const PRIORITY = /** @type {const} */ (['none', 'idle', 'pointing', 'sealing', '
  * @property {number | null} ratio Medida de la pinza suavizada (modo pinza).
  * @property {{ x: number, y: number } | null} palm Último centro de la palma (para seguir la mano).
  * @property {number} frameIndex Posición de la mano en el último fotograma (-1 si no está).
+ * @property {{ x: number, y: number } | null} lastTip Última punta aceptada (sin filtrar) mientras dibuja.
+ * @property {{ x: number, y: number } | null} lastTipPalm Centro de la palma cuando se aceptó `lastTip`.
+ * @property {number} glitches Fotogramas seguidos descartados por saltos imposibles.
+ * @property {{ point: { x: number, y: number }, timestamp: number }[]} pending Puntos retenidos mientras el gesto parece soltarse.
  */
 
 /** Distancia máxima (normalizada) que puede saltar una palma entre fotogramas y seguir siendo la misma mano. */
 const MAX_PALM_JUMP = 0.25;
+/**
+ * Salto máximo de la punta del índice entre dos fotogramas, en palmas,
+ * **además** de lo que se haya movido la palma. Más que eso no es un
+ * movimiento real del dedo sino un error del detector.
+ */
+const MAX_TIP_JUMP = 0.6;
+/** Fotogramas seguidos que se descartan como error antes de aceptar que el dedo de verdad está ahí. */
+const MAX_GLITCH_FRAMES = 3;
 
 /**
  * Convierte fotogramas de manos en gestos.
@@ -105,12 +117,24 @@ const MAX_PALM_JUMP = 0.25;
  * - Nadie puede borrar ni sellar mientras alguna mano dibuja.
  * - Tras una orden hay una pausa y hay que deshacer el gesto para repetirla.
  *
+ * Protecciones contra saltos del índice (errores del detector):
+ * - Si la punta del índice no encaja con el resto del dedo, se estima
+ *   prolongando el dedo (`stableIndexTip`).
+ * - Si la punta salta de golpe más de lo que permite el movimiento de la
+ *   palma, ese fotograma se descarta (hasta `MAX_GLITCH_FRAMES` seguidos).
+ * - Al soltar el gesto, los puntos de los fotogramas en que el dedo se está
+ *   doblando no se dibujan (si no, el trazo acaba con un «gancho»).
+ * - Las manos se emparejan con las del fotograma anterior por cercanía,
+ *   todas a la vez (la pareja más cercana primero): una detección falsa no
+ *   puede «robar» la mano que dibuja.
+ *
  * @fires gesture-changed - `{ hand, state, previous, overall }`
  * @fires draw-start - `{ hand, point, timestamp }`
  * @fires draw-move - `{ hand, point, timestamp }`
  * @fires draw-end - `{ hand, point, timestamp, reason: 'released' | 'lost' | 'reset' }`
  * @fires erase-progress - `{ hand, progress, timestamp }` (progress 0 = cancelado)
- * @fires erase - `{ hand, timestamp }`
+ * @fires erase - `{ hand, timestamp, outline, palm }` · `outline`: contorno de la mano (coordenadas de imagen) para borrar solo lo que cubre.
+ * @fires erase-move - `{ hand, timestamp, outline, palm }` · Después de borrar, mientras la mano sigue abierta: «esponja» para borrar más.
  * @fires seal-progress - `{ hand, progress, timestamp }`
  * @fires seal - `{ hand, timestamp }`
  * @fires pointer-move - `{ hand, point, timestamp }`
@@ -220,15 +244,16 @@ export class MotorGestos extends EventTarget {
       .map((hand, index) => ({ hand, index, features: computeHandFeatures(hand, { aspect }) }))
       .filter(({ hand }) => (hand.score ?? 1) >= this.#config.minScore);
 
-    for (const { hand, index, features } of candidates) {
-      const record = this.#match(features.palmCenter, hand.handedness, seen);
+    const assigned = this.#assign(candidates.map((c) => c.features.palmCenter));
+    for (const [k, { hand, index, features }] of candidates.entries()) {
+      const record = assigned[k] ?? this.#newRecord(hand.handedness, seen);
       seen.add(record.id);
       record.handedness = hand.handedness;
       record.palm = features.palmCenter;
       record.frameIndex = index;
       record.lastSeen = t;
       record.features = features;
-      this.#process(record, features, t);
+      this.#process(record, features, t, aspect ?? 4 / 3);
     }
 
     for (const record of [...this.#hands.values()]) {
@@ -279,6 +304,10 @@ export class MotorGestos extends EventTarget {
       ratio: null,
       palm: null,
       frameIndex: -1,
+      lastTip: null,
+      lastTipPalm: null,
+      glitches: 0,
+      pending: [],
       state: 'idle',
       lastSeen: 0,
       startFrames: 0,
@@ -293,31 +322,47 @@ export class MotorGestos extends EventTarget {
   }
 
   /**
-   * Encuentra qué mano conocida es la que aparece en el fotograma.
+   * Empareja las manos del fotograma con las manos conocidas.
    *
    * Se sigue por **continuidad de posición** (la palma más cercana a donde
    * estaba), no por la etiqueta izquierda/derecha: MediaPipe a veces cambia
    * esa etiqueta durante un fotograma y, si se usara como identificador, el
    * trazo se cortaría.
    *
-   * @param {{ x: number, y: number }} palm
+   * Se resuelven todas las parejas a la vez, de la más cercana a la más
+   * lejana. Así, si aparece una detección falsa cerca de la mano que dibuja,
+   * la mano de verdad (más cercana) conserva su registro.
+   *
+   * @param {{ x: number, y: number }[]} palms Centros de palma del fotograma.
+   * @returns {(HandRecord | undefined)[]} Registro de cada palma (`undefined` = mano nueva).
+   */
+  #assign(palms) {
+    const records = [...this.#hands.values()].filter((r) => r.palm);
+    const pairs = [];
+    for (const [i, palm] of palms.entries()) {
+      for (const record of records) {
+        const d = Math.hypot(/** @type {any} */ (record.palm).x - palm.x, /** @type {any} */ (record.palm).y - palm.y);
+        if (d < MAX_PALM_JUMP) pairs.push({ i, record, d });
+      }
+    }
+    pairs.sort((a, b) => a.d - b.d);
+    /** @type {(HandRecord | undefined)[]} */
+    const result = palms.map(() => undefined);
+    const used = new Set();
+    for (const { i, record } of pairs) {
+      if (result[i] || used.has(record)) continue;
+      result[i] = record;
+      used.add(record);
+    }
+    return result;
+  }
+
+  /**
    * @param {'Left' | 'Right'} handedness
    * @param {Set<string>} taken Manos ya asignadas en este fotograma.
    * @returns {HandRecord}
    */
-  #match(palm, handedness, taken) {
-    /** @type {HandRecord | null} */
-    let best = null;
-    let bestDistance = MAX_PALM_JUMP;
-    for (const record of this.#hands.values()) {
-      if (taken.has(record.id) || !record.palm) continue;
-      const d = Math.hypot(record.palm.x - palm.x, record.palm.y - palm.y);
-      if (d < bestDistance) {
-        best = record;
-        bestDistance = d;
-      }
-    }
-    if (best) return best;
+  #newRecord(handedness, taken) {
     /** @type {string} */
     let id = handedness;
     for (let n = 2; this.#hands.has(id) || taken.has(id); n++) id = `${handedness}#${n}`;
@@ -327,11 +372,29 @@ export class MotorGestos extends EventTarget {
   }
 
   /**
+   * ¿Es creíble que la punta del índice esté ahora en `tip`?
+   * Compara su salto con lo que se ha movido la palma desde el último punto aceptado.
+   * @param {HandRecord} record
+   * @param {HandFeatures} f
+   * @param {{ x: number, y: number }} tip
+   * @param {number} aspect
+   */
+  #plausibleTip(record, f, tip, aspect) {
+    if (!record.lastTip || !record.lastTipPalm) return true;
+    const dist = (/** @type {{ x: number, y: number }} */ a, /** @type {{ x: number, y: number }} */ b) =>
+      Math.hypot((a.x - b.x) * aspect, a.y - b.y);
+    const jump = dist(tip, record.lastTip);
+    const palmMove = dist(f.palmCenter, record.lastTipPalm);
+    return jump <= palmMove * 1.5 + MAX_TIP_JUMP * f.imagePalmSize;
+  }
+
+  /**
    * @param {HandRecord} record
    * @param {HandFeatures} f
    * @param {number} t
+   * @param {number} aspect Ancho/alto de la imagen.
    */
-  #process(record, f, t) {
+  #process(record, f, t, aspect) {
     const cfg = this.#config;
     const seconds = t / 1000;
     const pointMode = cfg.drawGesture === 'point';
@@ -346,16 +409,37 @@ export class MotorGestos extends EventTarget {
       const keeps = pointMode
         ? f.fingerRatios.index > cfg.pointKeep && othersMax < cfg.curlKeep
         : /** @type {number} */ (record.ratio) <= cfg.pinchEnd;
-      record.point = record.filter.filter(drawPoint, seconds);
       record.releaseFrames = keeps ? 0 : record.releaseFrames + 1;
       if (record.releaseFrames >= cfg.framesToEnd) {
+        // Los puntos retenidos son del dedo doblándose: se descartan.
+        record.pending = [];
         this.#emit('draw-end', { hand: record.id, point: record.point, timestamp: t, reason: 'released' });
         record.startFrames = 0;
         record.releaseFrames = 0;
         this.#setState(record, 'idle');
-      } else {
-        this.#emit('draw-move', { hand: record.id, point: record.point, timestamp: t });
+        return;
       }
+      // Salto imposible de la punta: se ignora este fotograma (unos pocos como máximo).
+      if (!this.#plausibleTip(record, f, drawPoint, aspect) && record.glitches < MAX_GLITCH_FRAMES) {
+        record.glitches++;
+        return;
+      }
+      record.glitches = 0;
+      record.lastTip = drawPoint;
+      record.lastTipPalm = f.palmCenter;
+      const point = record.filter.filter(drawPoint, seconds);
+      if (record.releaseFrames > 0) {
+        // Parece que se suelta: se retiene el punto hasta saber si sigue dibujando.
+        record.pending.push({ point, timestamp: t });
+        return;
+      }
+      for (const held of record.pending) {
+        record.point = held.point;
+        this.#emit('draw-move', { hand: record.id, point: held.point, timestamp: held.timestamp });
+      }
+      record.pending = [];
+      record.point = point;
+      this.#emit('draw-move', { hand: record.id, point, timestamp: t });
       return;
     }
 
@@ -367,6 +451,10 @@ export class MotorGestos extends EventTarget {
       this.#cancelHold(record, t);
       record.filter.reset();
       record.releaseFrames = 0;
+      record.glitches = 0;
+      record.pending = [];
+      record.lastTip = drawPoint;
+      record.lastTipPalm = f.palmCenter;
       record.point = record.filter.filter(drawPoint, seconds);
       this.#setState(record, 'drawing');
       this.#emit('draw-start', { hand: record.id, point: record.point, timestamp: t });
@@ -374,13 +462,19 @@ export class MotorGestos extends EventTarget {
     }
 
     // 2. Órdenes mantenidas (borrar / sellar).
+    // Después de borrar, mientras la mano siga abierta hace de «esponja».
+    if (record.latched === 'erasing' && f.isOpenPalm) {
+      this.#setState(record, 'erasing');
+      this.#emit('erase-move', { hand: record.id, timestamp: t, outline: f.outline, palm: f.palmCenter });
+      return;
+    }
     if (record.latched === 'erasing' && !f.isOpenPalm) record.latched = null;
     if (record.latched === 'sealing' && !f.isFist) record.latched = null;
     const someoneDrawing = [...this.#hands.values()].some((r) => r.state === 'drawing');
     const blocked = someoneDrawing || t < this.#cooldownUntil;
 
     if (!blocked && f.isOpenPalm && record.latched !== 'erasing') {
-      this.#hold(record, 'erasing', cfg.eraseHoldMs, 'erase', t);
+      this.#hold(record, 'erasing', cfg.eraseHoldMs, 'erase', t, { outline: f.outline, palm: f.palmCenter });
       return;
     }
     if (!blocked && f.isFist && record.latched !== 'sealing') {
@@ -406,8 +500,9 @@ export class MotorGestos extends EventTarget {
    * @param {number} duration
    * @param {'erase' | 'seal'} eventName
    * @param {number} t
+   * @param {object} [extra] Datos que se añaden al evento final.
    */
-  #hold(record, state, duration, eventName, t) {
+  #hold(record, state, duration, eventName, t, extra = {}) {
     if (record.state !== state) {
       this.#cancelHold(record, t);
       record.holdStart = t;
@@ -416,12 +511,12 @@ export class MotorGestos extends EventTarget {
     record.progress = clamp((t - /** @type {number} */ (record.holdStart)) / duration, 0, 1);
     this.#emit(`${eventName}-progress`, { hand: record.id, progress: record.progress, timestamp: t });
     if (record.progress >= 1) {
-      this.#emit(eventName, { hand: record.id, timestamp: t });
+      this.#emit(eventName, { hand: record.id, timestamp: t, ...extra });
       this.#cooldownUntil = t + this.#config.commandCooldownMs;
       record.latched = state;
       record.holdStart = null;
       record.progress = 0;
-      this.#setState(record, 'idle');
+      this.#setState(record, state === 'erasing' ? 'erasing' : 'idle');
     }
   }
 

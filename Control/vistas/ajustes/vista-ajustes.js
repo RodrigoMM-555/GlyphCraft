@@ -2,6 +2,7 @@ import { GcVistaCamara } from 'glyphcraft-kit';
 import { viewHeader } from '../marco-vista.js';
 import { settings, progressStore } from '../../servicios/servicios-app.js';
 import { exportData, importData } from '../../servicios/copia-seguridad.js';
+import { activeZone } from '../../servicios/calibracion.js';
 
 /** @typedef {import('glyphcraft-kit').GcInterruptorRuna} GcInterruptorRuna */
 /** @typedef {import('glyphcraft-kit').GcDeslizadorRuna} GcDeslizadorRuna */
@@ -21,6 +22,9 @@ const FORMATTERS = {
   'hands.sealHoldMs': seconds,
   'recognition.tolerance': (v) => (v < 0.3 ? 'Exigente' : v > 0.7 ? 'Permisiva' : 'Normal'),
   'sound.volume': pct,
+  'a11y.textScale': pct,
+  'drawing.correction': (v) => (v === 0 ? 'Desactivada' : v === 1 ? 'Forma perfecta' : pct(v)),
+  'camera.zoneSize': (v) => (v >= 0.99 ? 'Toda la cámara' : `${pct(v)} del ancho`),
 };
 
 /**
@@ -63,13 +67,20 @@ export class VistaAjustes extends HTMLElement {
       ${viewHeader({
         kicker: 'Ajustes del taller',
         title: 'Ajustes',
-        intro: 'Adapta la experiencia a tu cámara, tu iluminación y tu equipo. Los cambios se guardan al momento en este navegador.',
+        intro:
+          'Adapta la experiencia a tu cámara, tu iluminación, tu equipo y tus necesidades. Los cambios se guardan al momento en este navegador.',
       })}
       <form class="settings" onsubmit="return false">
         <fieldset>
           <legend>Cámara</legend>
+          ${toggle('camera.enabled', 'Encender la cámara al entrar en la práctica')}
           ${select('camera.deviceId', 'Dispositivo', [['', 'Predeterminada']])}
           ${toggle('camera.showVideo', 'Mostrar la imagen de la cámara')}
+          ${slider('camera.zoneSize', 'Tamaño de la zona de trazado', 'min="0.3" max="1" step="0.05"')}
+          <div class="zone-preview" aria-hidden="true">
+            <div class="zone-preview__frame"><div class="zone-preview__zone"></div></div>
+          </div>
+          <p class="field__help zone-preview__text" id="zone-help"></p>
           <gc-rune-button size="sm" variant="ghost" rune="target" data-action="reset-calibration">Restablecer la zona de trazado</gc-rune-button>
         </fieldset>
         <fieldset>
@@ -84,6 +95,8 @@ export class VistaAjustes extends HTMLElement {
         </fieldset>
         <fieldset>
           <legend>Reconocimiento</legend>
+          ${slider('drawing.correction', 'Corrección de los trazos', 'min="0" max="1" step="0.05"')}
+          <p class="field__help">Al terminar cada trazo, lo acerca a la forma perfecta del símbolo del grimorio que se le parece: al 100 % queda idéntico; al 0 %, tal cual lo dibujas. Cada nivel pone un máximo: Aprendiz 100 %, Artesano 60 %, Maestro 30 %.</p>
           ${select('recognition.level', 'Nivel de la práctica guiada', [['apprentice', 'Aprendiz'], ['artisan', 'Artesano'], ['master', 'Maestro']])}
           ${slider('recognition.tolerance', 'Tolerancia con el trazo', 'min="0" max="1" step="0.05"')}
         </fieldset>
@@ -96,6 +109,14 @@ export class VistaAjustes extends HTMLElement {
           <legend>Sonido</legend>
           ${toggle('sound.enabled', 'Sonido')}
           ${slider('sound.volume', 'Volumen', 'min="0" max="1" step="0.05"')}
+        </fieldset>
+        <fieldset>
+          <legend>Accesibilidad</legend>
+          ${slider('a11y.textScale', 'Tamaño del texto', 'min="1" max="1.5" step="0.05"')}
+          ${toggle('a11y.highContrast', 'Alto contraste')}
+          ${toggle('a11y.reduceMotion', 'Reducir el movimiento (sin animaciones ni efectos 3D)')}
+          ${toggle('a11y.speak', 'Leer en voz alta los resultados')}
+          <gc-rune-button size="sm" variant="ghost" rune="eye" data-action="help">Ver la ayuda y los atajos de teclado</gc-rune-button>
         </fieldset>
         <fieldset>
           <legend>Pantalla y datos</legend>
@@ -125,6 +146,23 @@ export class VistaAjustes extends HTMLElement {
       else if (el.localName === 'gc-rune-slider') /** @type {GcDeslizadorRuna} */ (el).value = value;
       else /** @type {HTMLSelectElement} */ (el).value = String(value);
     }
+    this.#renderZone();
+  }
+
+  /** Dibuja la zona de trazado sobre un recuadro 4:3 que representa la imagen de la cámara. */
+  #renderZone() {
+    const calibration = settings.get('camera.calibration');
+    const zone = activeZone(calibration, settings.get('camera.zoneSize'));
+    const box = /** @type {HTMLElement} */ (this.querySelector('.zone-preview__zone'));
+    Object.assign(box.style, {
+      left: `${zone.x * 100}%`,
+      top: `${zone.y * 100}%`,
+      width: `${zone.width * 100}%`,
+      height: `${zone.height * 100}%`,
+    });
+    /** @type {HTMLElement} */ (this.querySelector('.zone-preview__text')).textContent = calibration
+      ? 'Usas una zona calibrada en la práctica. Mueve el control para cambiar a una zona centrada de ese tamaño.'
+      : 'El recuadro es la imagen de la cámara y el cuadrado dorado, la parte donde tu mano dibuja. Más pequeña: menos movimiento de brazo; más grande: más precisión.';
   }
 
   async #loadDevices() {
@@ -150,6 +188,8 @@ export class VistaAjustes extends HTMLElement {
           ? /** @type {GcDeslizadorRuna} */ (el).value
           : /** @type {HTMLSelectElement} */ (el).value;
     settings.set(/** @type {any} */ (key), value);
+    // Elegir un tamaño sustituye a la zona calibrada (si no, no tendría efecto).
+    if (key === 'camera.zoneSize' && settings.get('camera.calibration')) settings.set('camera.calibration', null);
   };
 
   /** @param {Event} event */
@@ -177,7 +217,8 @@ export class VistaAjustes extends HTMLElement {
         break;
       case 'reset-calibration':
         settings.set('camera.calibration', null);
-        whisper?.show({ type: 'info', message: 'Zona de trazado restablecida al tamaño predeterminado.' });
+        settings.set('camera.zoneSize', 1);
+        whisper?.show({ type: 'info', message: 'Zona de trazado restablecida: vuelve a abarcar toda la cámara.' });
         break;
       case 'reset-progress':
         progressStore.reset();

@@ -21,6 +21,10 @@ import { LANDMARK as L, FINGERS, LANDMARK_COUNT } from './puntos-mano.js';
  * @property {number} pinchRatio Contacto pulgar-índice / tamaño de la palma (la menor de: punta-punta, punta del pulgar-DIP del índice, IP del pulgar-punta del índice).
  * @property {{ x: number, y: number }} pinchPoint Punto entre pulgar e índice (coordenadas de imagen).
  * @property {{ x: number, y: number }} indexTip Punta del índice (coordenadas de imagen).
+ * @property {{ x: number, y: number }} indexTipRaw Punta del índice tal como llega del detector.
+ *   `indexTip` es esta misma salvo que sea incoherente con el resto del dedo (ver `stableIndexTip`).
+ * @property {number} imagePalmSize Tamaño de la palma en la imagen (unidades del alto, con el aspecto corregido).
+ * @property {{ x: number, y: number }[]} outline Contorno de la mano (envolvente convexa de los 21 puntos, coordenadas de imagen).
  * @property {{ x: number, y: number }} palmCenter Centro de la palma (coordenadas de imagen).
  * @property {{ thumb: boolean, index: boolean, middle: boolean, ring: boolean, pinky: boolean }} extended Dedos estirados.
  * @property {number} extendedCount Dedos largos estirados (0-4).
@@ -131,13 +135,19 @@ export function computeHandFeatures(hand, { aspect = 4 / 3 } = {}) {
   const isPointing = index.ratio > T.pointIndex && others.every((f) => f.ratio < T.pointCurl);
 
   const pinch = midpoint(image[L.THUMB_TIP], image[L.INDEX_TIP]);
+  const imagePoints = image.map((p) => ({ x: p.x * aspect, y: p.y }));
+  const imagePalmSize = distance(imagePoints[L.WRIST], imagePoints[L.MIDDLE_MCP]) || 1e-6;
+  const tip = stableIndexTip(image, aspect, imagePalmSize);
   const palm = centroid([image[L.WRIST], image[L.INDEX_MCP], image[L.MIDDLE_MCP], image[L.RING_MCP], image[L.PINKY_MCP]]);
 
   return {
     palmSize,
     pinchRatio,
     pinchPoint: { x: pinch.x, y: pinch.y },
-    indexTip: { x: image[L.INDEX_TIP].x, y: image[L.INDEX_TIP].y },
+    indexTip: tip,
+    indexTipRaw: { x: image[L.INDEX_TIP].x, y: image[L.INDEX_TIP].y },
+    imagePalmSize,
+    outline: convexHull(image.map((p) => ({ x: p.x, y: p.y })), aspect),
     palmCenter: { x: palm.x, y: palm.y },
     extended,
     extendedCount,
@@ -149,4 +159,56 @@ export function computeHandFeatures(hand, { aspect = 4 / 3 } = {}) {
     fingerRatios: { index: index.ratio, middle: middle.ratio, ring: ring.ratio, pinky: pinky.ratio },
     thumbSpread,
   };
+}
+
+/**
+ * Punta del índice «fiable».
+ *
+ * A veces el detector coloca la punta lejos de donde puede estar (un
+ * fotograma con el dedo tapado, borroso o apuntando a la cámara). La punta
+ * no puede alejarse de la articulación anterior (DIP) más que una falange:
+ * si lo hace, se estima prolongando el dedo (PIP → DIP) en lugar de usarla.
+ *
+ * @param {Landmark[]} image Puntos de la imagen (0-1).
+ * @param {number} aspect Ancho/alto de la imagen.
+ * @param {number} palm Tamaño de la palma en la imagen (mismas unidades corregidas).
+ * @returns {{ x: number, y: number }}
+ */
+export function stableIndexTip(image, aspect, palm) {
+  const tip = image[L.INDEX_TIP];
+  const dip = image[L.INDEX_DIP];
+  const pip = image[L.INDEX_PIP];
+  const d = (/** @type {Landmark} */ a, /** @type {Landmark} */ b) => Math.hypot((a.x - b.x) * aspect, a.y - b.y);
+  const tipToDip = d(tip, dip);
+  const dipToPip = d(dip, pip);
+  // Una falange distal mide ≈ 0,2-0,3 palmas; más de 0,55 o mucho más que la
+  // falange media es un error del detector.
+  if (tipToDip <= Math.max(0.55 * palm, 1.8 * dipToPip)) return { x: tip.x, y: tip.y };
+  const k = 0.8; // la falange distal es algo más corta que la media
+  return { x: dip.x + (dip.x - pip.x) * k, y: dip.y + (dip.y - pip.y) * k };
+}
+
+/**
+ * Envolvente convexa (cadena monótona de Andrew), calculada con el aspecto
+ * corregido y devuelta en coordenadas de imagen.
+ * @param {{ x: number, y: number }[]} points
+ * @param {number} aspect
+ */
+export function convexHull(points, aspect = 1) {
+  const pts = points.map((p) => ({ x: p.x * aspect, y: p.y })).sort((a, b) => a.x - b.x || a.y - b.y);
+  if (pts.length < 3) return points.map((p) => ({ ...p }));
+  const cross = (/** @type {any} */ o, /** @type {any} */ a, /** @type {any} */ b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  /** @type {{ x: number, y: number }[]} */
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  /** @type {{ x: number, y: number }[]} */
+  const upper = [];
+  for (const p of [...pts].reverse()) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)].map((p) => ({ x: p.x / aspect, y: p.y }));
 }

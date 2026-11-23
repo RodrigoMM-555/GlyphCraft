@@ -18,6 +18,7 @@ import { getSpell, spellIds, registerSpell } from '../../efectos/registro.js';
  * @property {{ x: number, y: number }[][]} [strokes] Trazos dibujados (mismas coordenadas).
  * @property {number} [intensity=1] 0-1: potencia del hechizo (p. ej. la precisión).
  * @property {number} [stability=1] 0-1: si es baja, el efecto parpadea.
+ * @property {number} [power=1] 0,3-2: potencia (p. ej. por el tamaño del glifo). Más partículas y más alcance.
  */
 
 /** Ajustes por calidad: partículas y densidad de píxeles. */
@@ -188,7 +189,7 @@ export class GcEscenarioHechizo extends HTMLElement {
    * @returns {Promise<boolean>} Se resuelve al terminar; `false` si no hay WebGL o se pidió movimiento reducido.
    * @throws {RangeError} si el hechizo no existe.
    */
-  cast(spellId, { x = 0.5, y = 0.5, radius = 0.4, strokes = [], intensity = 1, stability = 1 } = {}) {
+  cast(spellId, { x = 0.5, y = 0.5, radius = 0.4, strokes = [], intensity = 1, stability = 1, power = 1 } = {}) {
     const ids = Array.isArray(spellId) ? spellId : [spellId];
     if (!ids.length) throw new RangeError('cast() necesita al menos un hechizo.');
     const spells = ids.map((id) => {
@@ -198,8 +199,8 @@ export class GcEscenarioHechizo extends HTMLElement {
     });
     const spell = spells[0];
     const label = ids.join('+');
-    if (![x, y, radius, intensity, stability].every(Number.isFinite) || radius <= 0) {
-      throw new TypeError('cast(): x, y, radius, intensity y stability deben ser números (radius > 0).');
+    if (![x, y, radius, intensity, stability, power].every(Number.isFinite) || radius <= 0) {
+      throw new TypeError('cast(): x, y, radius, intensity, stability y power deben ser números (radius > 0).');
     }
     if (!this.#renderer || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve(false);
 
@@ -214,6 +215,7 @@ export class GcEscenarioHechizo extends HTMLElement {
       strokes: strokes.map((s) => s.filter((p) => Number.isFinite(p?.x) && Number.isFinite(p?.y)).map(toWorld)),
       intensity: clamp01(intensity),
       stability: clamp01(stability),
+      power: Math.min(2, Math.max(0.3, power)),
       density: QUALITY[this.quality].density,
       sizeScale: this.#sizeScale,
       color: spell.color,

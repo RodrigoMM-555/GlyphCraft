@@ -19,7 +19,7 @@ const TIEMPO_MAXIMO_MS = 5000;
  * @typedef {object} Grupo
  * @property {string} nombre
  * @property {Grupo | null} padre
- * @property {Array<{tipo: 'prueba', nombre: string, fn: Function} | {tipo: 'grupo', grupo: Grupo}>} hijos
+ * @property {Array<{tipo: 'prueba', nombre: string, fn: Function, tiempoMaximo: number} | {tipo: 'grupo', grupo: Grupo}>} hijos
  * @property {Function[]} antesDeCada
  * @property {Function[]} despuesDeCada
  * @property {Function[]} antesDeTodo
@@ -55,9 +55,10 @@ export function describe(nombre, fn) {
  * Declara una prueba.
  * @param {string} nombre
  * @param {Function} fn
+ * @param {number} [tiempoMaximo] Milisegundos antes de darla por fallida (como en Vitest). Por defecto 5000.
  */
-export function it(nombre, fn) {
-  grupoActual.hijos.push({ tipo: 'prueba', nombre, fn });
+export function it(nombre, fn, tiempoMaximo = TIEMPO_MAXIMO_MS) {
+  grupoActual.hijos.push({ tipo: 'prueba', nombre, fn, tiempoMaximo });
 }
 
 /**
@@ -599,14 +600,12 @@ export const userEvent = {
 /**
  * Ejecuta una función con tiempo máximo.
  * @param {Function} funcion
+ * @param {number} [ms]
  */
-async function conTiempoMaximo(funcion) {
+async function conTiempoMaximo(funcion, ms = TIEMPO_MAXIMO_MS) {
   let temporizador = 0;
   const limite = new Promise((_, rechazar) => {
-    temporizador = window.setTimeout(
-      () => rechazar(new Error(`Tiempo agotado (${TIEMPO_MAXIMO_MS} ms)`)),
-      TIEMPO_MAXIMO_MS,
-    );
+    temporizador = window.setTimeout(() => rechazar(new Error(`Tiempo agotado (${ms} ms)`)), ms);
   });
   try {
     await Promise.race([funcion(), limite]);
@@ -641,7 +640,7 @@ async function ejecutarGrupo(grupo, ruta, resultados) {
     try {
       for (const gancho of ganchos(grupo, 'antesDeCada')) await gancho();
       try {
-        await conTiempoMaximo(hijo.fn);
+        await conTiempoMaximo(hijo.fn, hijo.tiempoMaximo);
       } finally {
         // Los ganchos «después» se ejecutan del más interno al más externo.
         for (const gancho of ganchos(grupo, 'despuesDeCada').reverse()) await gancho();

@@ -1,12 +1,11 @@
 import { CAMERA_ERROR_MESSAGES } from 'glyphcraft-kit';
+import { glyphLibrary, templatesFromGlyphs } from 'glyphcraft-kit/nucleo';
+import { effectiveCorrection, CORRECTION_LIMITS } from '../../servicios/ajustes.js';
 import { EntradaMano } from '../../servicios/entrada-mano.js';
-import {
-  DEFAULT_CALIBRATION,
-  calibrationToZone,
-  calibrationFromPath,
-  mapToCanvas,
-} from '../../servicios/calibracion.js';
+import { activeZone, calibrationToZone, calibrationFromPath, mapToCanvas } from '../../servicios/calibracion.js';
 import { settings, audio, progressStore, oneEuroFromSmoothing } from '../../servicios/servicios-app.js';
+import { speak } from '../../servicios/accesibilidad.js';
+import { glyphPower } from '../../servicios/hechizos.js';
 
 /** Cada cuánto se guarda el tiempo de práctica (ms). */
 const PRACTICE_TICK_MS = 10000;
@@ -53,11 +52,19 @@ const loadEffects = () => (effectsModule ??= import('glyphcraft-kit/efectos').ca
  * - `extras`: contenedor del panel donde la vista añade su propia interfaz.
  * - `setGuide(strokes, options)`, `setFeedback(grades)`, `clear()`, `strokes`.
  * - `activate(glyph, transform)`: animación de activación sobre lo dibujado.
+ * - `announce(text)`: mensaje de estado (región viva) que también se lee en voz alta si se ha pedido.
  * - Evento `glyph-sealed` (`{ strokes }`) al sellar con el puño o el botón.
+ *
+ * La cámara se enciende sola al entrar (ajuste `camera.enabled`); si la
+ * persona la apaga, se recuerda para la próxima vez.
+ *
+ * Atajos de teclado: <kbd>S</kbd> sellar · <kbd>Z</kbd> deshacer ·
+ * <kbd>X</kbd> borrar · <kbd>C</kbd> cámara · <kbd>D</kbd> rendimiento ·
+ * <kbd>R</kbd> grabar sesión.
  */
 export class EstacionLanzamiento extends HTMLElement {
   #input = new EntradaMano();
-  #zone = calibrationToZone(settings.get('camera.calibration') ?? DEFAULT_CALIBRATION);
+  #zone = activeZone(settings.get('camera.calibration'), settings.get('camera.zoneSize'));
   #practiceTimer = 0;
   #lastTick = 0;
   #imageSize = { imageWidth: 640, imageHeight: 480 };
@@ -110,7 +117,8 @@ export class EstacionLanzamiento extends HTMLElement {
     engine.addEventListener('draw-start', this.#onDrawStart, { signal });
     engine.addEventListener('draw-move', this.#onDrawMove, { signal });
     engine.addEventListener('draw-end', this.#onDrawEnd, { signal });
-    engine.addEventListener('erase', () => this.#canvas.clear(), { signal });
+    engine.addEventListener('erase', (e) => this.#eraseUnderHand(/** @type {CustomEvent} */ (e).detail, false), { signal });
+    engine.addEventListener('erase-move', (e) => this.#eraseUnderHand(/** @type {CustomEvent} */ (e).detail, true), { signal });
     engine.addEventListener('seal', () => {
       audio.play('seal');
       this.seal();
@@ -128,6 +136,8 @@ export class EstacionLanzamiento extends HTMLElement {
 
     this.#applySettings();
     this.#syncMode();
+    // Cámara activada por defecto: se enciende al entrar salvo que se apagara la última vez.
+    if (settings.get('camera.enabled') && this.#input.mode === 'off') this.#startCamera();
   }
 
   disconnectedCallback() {
@@ -179,6 +189,15 @@ export class EstacionLanzamiento extends HTMLElement {
     this.#updateHint();
   }
 
+  /**
+   * Muestra un mensaje de estado y, si está activada la lectura en voz alta, lo lee.
+   * @param {string} text
+   */
+  announce(text) {
+    this.#setStatus(text);
+    speak(text);
+  }
+
   /** @param {{ animated?: boolean }} [options] */
   clear(options) {
     return this.#canvas.clear(options);
@@ -204,16 +223,22 @@ export class EstacionLanzamiento extends HTMLElement {
    * (o con movimiento reducido): el glifo correcto aparece sobre lo
    * dibujado y se consume en SVG.
    *
-   * @param {Glyph | Glyph[]} glyphs Glifo (o varios combinados, en el laboratorio).
+   * @param {Glyph | Glyph[]} glyphs Glifo (o varios combinados).
    * @param {{ cx: number, cy: number, r: number }} transform Círculo dibujado (coordenadas del lienzo).
-   * @param {{ score?: number }} [options] Precisión 0-100: da potencia y estabilidad al hechizo.
+   * @param {{ score?: number, spells?: string[], power?: number }} [options]
+   *   `score`: precisión 0-100 (intensidad y estabilidad). `spells`: hechizos a lanzar (por defecto, los
+   *   de cada glifo). `power`: potencia; por defecto, según el tamaño del círculo dibujado.
    */
-  async activate(glyphs, { cx, cy, r }, { score = 100 } = {}) {
+  async activate(glyphs, { cx, cy, r }, { score = 100, spells, power = glyphPower(r) } = {}) {
     const list = Array.isArray(glyphs) ? glyphs : [glyphs];
     const glyph = list[0];
-    const spellIds = list.map((g) => g.effect?.spell).filter((id) => typeof id === 'string');
+    const elementSpells = list.map((g) => g.effect?.spell).filter((id) => typeof id === 'string');
+    const spellIds = spells ?? elementSpells;
     audio.play('charge');
-    window.setTimeout(() => spellIds.forEach((id) => audio.play(`spell:${id}`)), BURST_MS);
+    window.setTimeout(() => {
+      elementSpells.forEach((id) => audio.play(`spell:${id}`));
+      this.#quake(power);
+    }, BURST_MS);
     await loadEffects();
     const stage = this.#spells;
     const available = /** @type {any} */ (stage.constructor).spells ?? [];
@@ -227,6 +252,7 @@ export class EstacionLanzamiento extends HTMLElement {
         strokes,
         intensity: score / 100,
         stability: Math.min(1, Math.max(0, (score - 50) / 45)),
+        power,
       });
       // La tinta se apaga mientras sus partículas toman el relevo.
       await this.#canvas.clear({ animated: true });
@@ -251,6 +277,23 @@ export class EstacionLanzamiento extends HTMLElement {
     this.#canvas.readonly = false;
   }
 
+  /**
+   * Temblor del círculo al estallar un hechizo potente (glifos grandes).
+   * @param {number} power
+   */
+  #quake(power) {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (power < 1.15 || reduced) return;
+    const amount = Math.min(10, (power - 1) * 12);
+    const stage = /** @type {HTMLElement} */ (this.querySelector('.stage'));
+    stage.animate(
+      [0, 1, -1, 0.7, -0.6, 0.3, 0].map((k, i) => ({ transform: `translate(${k * amount}px, ${(i % 2 ? -k : k) * amount * 0.6}px)` })),
+      { duration: 480, easing: 'ease-out' },
+    );
+    const rect = stage.getBoundingClientRect();
+    /** @type {any} */ (document.querySelector('gc-arcane-backdrop'))?.burst?.(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }
+
   // ── Construcción ──────────────────────────────────────────
 
   #render() {
@@ -258,13 +301,18 @@ export class EstacionLanzamiento extends HTMLElement {
     this.innerHTML = `
       <div class="stage">
         <div class="stage__rings" aria-hidden="true"></div>
-        <gc-glyph-canvas class="stage__canvas" pointer-input line-width="5"></gc-glyph-canvas>
+        <gc-glyph-canvas class="stage__canvas" pointer-input line-width="5" auto-correct aria-describedby="stage-help"></gc-glyph-canvas>
         <gc-glyph class="stage__activation" hidden aria-hidden="true"></gc-glyph>
         <gc-spell-stage class="stage__spells" overflow="0.35"></gc-spell-stage>
         <gc-hand-overlay class="stage__hands" variant="constellation" fit="fill"></gc-hand-overlay>
         <p class="stage__hint" aria-hidden="true"></p>
         <p class="stage__calibrating" hidden>Levanta el índice y traza un círculo cómodo.<br>Su tamaño fijará tu zona de trazado.</p>
       </div>
+
+      <p id="stage-help" class="visually-hidden">
+        Círculo de trazado. Dibuja con el ratón, el dedo o el índice frente a la cámara.
+        Atajos: S sella el glifo, Z deshace el último trazo, X borra todo y C enciende o apaga la cámara.
+      </p>
 
       <aside class="practice__panel" aria-label="Controles de práctica">
         <gc-camera-preview class="pip" hidden>
@@ -275,17 +323,17 @@ export class EstacionLanzamiento extends HTMLElement {
 
         <!-- Lo más usado arriba: sellar, deshacer y borrar -->
         <div class="practice__actions">
-          <gc-rune-button rune="seal" data-action="seal" class="action-seal">Sellar glifo</gc-rune-button>
+          <gc-rune-button rune="seal" data-action="seal" class="action-seal" aria-keyshortcuts="S" title="Sellar glifo (S)">Sellar glifo</gc-rune-button>
         </div>
         <div class="practice__actions practice__actions--row">
-          <gc-rune-button rune="undo" size="sm" variant="ghost" data-action="undo">Deshacer</gc-rune-button>
-          <gc-rune-button rune="palm" size="sm" variant="danger" data-action="clear" hold-ms="600">Borrar</gc-rune-button>
+          <gc-rune-button rune="undo" size="sm" variant="ghost" data-action="undo" aria-keyshortcuts="Z" title="Deshacer el último trazo (Z)">Deshacer</gc-rune-button>
+          <gc-rune-button rune="palm" size="sm" variant="danger" data-action="clear" hold-ms="600" aria-keyshortcuts="X" title="Mantén pulsado para borrar todo (X)">Borrar</gc-rune-button>
         </div>
 
         <div class="practice__extras"></div>
 
         <div class="practice__actions practice__actions--input">
-          <gc-rune-button rune="camera" variant="ghost" data-action="camera" class="action-camera">Activar cámara</gc-rune-button>
+          <gc-rune-button rune="camera" variant="ghost" data-action="camera" class="action-camera" aria-keyshortcuts="C" title="Encender o apagar la cámara (C)">Activar cámara</gc-rune-button>
           <gc-rune-button rune="play" variant="ghost" data-action="demo" class="action-demo">Ver demostración</gc-rune-button>
           <gc-rune-button rune="target" variant="ghost" data-action="calibrate" class="action-calibrate" disabled>Calibrar</gc-rune-button>
         </div>
@@ -293,15 +341,17 @@ export class EstacionLanzamiento extends HTMLElement {
           <gc-rune-toggle data-setting="camera.showVideo">Ver la cámara</gc-rune-toggle>
           <gc-rune-toggle data-setting="hands.showOnCanvas">Ver la mano sobre el lienzo</gc-rune-toggle>
         </div>
+        <p class="practice__correction"></p>
 
         <details class="practice__help">
           <summary>Gestos</summary>
           <dl>
             <div><dt>Índice levantado</dt><dd>Con el resto de dedos recogidos: dibuja con la punta del índice.</dd></div>
-            <div><dt>Mano bien abierta</dt><dd>Dedos estirados y separados, un instante: borra el glifo.</dd></div>
+            <div><dt>Mano bien abierta</dt><dd>Dedos estirados y separados, un instante, encima de un trazo: borra los trazos que quedan bajo la palma. Si la mantienes abierta, puedes pasarla por encima de otros para borrarlos también.</dd></div>
             <div><dt>Puño bien cerrado</dt><dd>Todos los dedos doblados, un instante: sella el glifo.</dd></div>
           </dl>
-          <p>También puedes dibujar con el ratón o el dedo. Atajos: <kbd>D</kbd> rendimiento · <kbd>R</kbd> grabar sesión.</p>
+          <p>También puedes dibujar con el ratón o el dedo. Cuanto <strong>más grande</strong> traces el círculo, más fuerte será el hechizo.</p>
+          <p>Atajos: <kbd>S</kbd> sellar · <kbd>Z</kbd> deshacer · <kbd>X</kbd> borrar · <kbd>C</kbd> cámara · <kbd>D</kbd> rendimiento · <kbd>R</kbd> grabar sesión.</p>
         </details>
         <dl class="practice__stats" hidden></dl>
       </aside>`;
@@ -336,8 +386,13 @@ export class EstacionLanzamiento extends HTMLElement {
         this.seal();
         break;
       case 'camera':
-        if (this.#input.mode === 'camera') this.#stopCamera();
-        else await this.#startCamera();
+        if (this.#input.mode === 'camera') {
+          this.#stopCamera();
+          settings.set('camera.enabled', false);
+        } else {
+          settings.set('camera.enabled', true);
+          await this.#startCamera();
+        }
         break;
       case 'demo':
         if (this.#input.mode === 'demo') this.#input.stop();
@@ -363,7 +418,12 @@ export class EstacionLanzamiento extends HTMLElement {
       await this.#input.startCamera(this.#camera.frameSource);
       this.#lastHandsAt = performance.now();
       this.#hintShown = false;
-      this.#setStatus('Cámara activa. Levanta el índice (con el resto de dedos recogidos) para dibujar.');
+      const whole = !settings.get('camera.calibration') && settings.get('camera.zoneSize') >= 0.99;
+      this.announce(
+        `Cámara activa. Levanta el índice, con el resto de dedos recogidos, para dibujar. ${
+          whole ? 'Puedes moverte por toda la imagen.' : 'Mueve la mano dentro del recuadro de la cámara.'
+        }`,
+      );
     } catch (error) {
       console.error(error);
       this.#camera.stop();
@@ -379,7 +439,7 @@ export class EstacionLanzamiento extends HTMLElement {
   #stopCamera() {
     this.#input.stop();
     this.#camera.stop();
-    this.#setStatus('Cámara apagada.');
+    this.announce('Cámara apagada. Puedes volver a encenderla con el botón o con la tecla C.');
   }
 
   async #startDemo() {
@@ -450,6 +510,33 @@ export class EstacionLanzamiento extends HTMLElement {
     }
   };
 
+  /**
+   * Borra solo los trazos que quedan bajo la mano abierta.
+   *
+   * El contorno de la mano (en la imagen) se lleva al lienzo con la misma
+   * proyección que el dedo y se agranda un poco, para que no haga falta
+   * taparlo con precisión. Con `sponge` (la mano sigue abierta después de
+   * borrar) se van sumando los trozos por los que pasa.
+   *
+   * @param {{ outline?: { x: number, y: number }[] }} detail
+   * @param {boolean} sponge
+   */
+  #eraseUnderHand({ outline }, sponge) {
+    if (this.#calibrating || !outline || outline.length < 3) return;
+    const polygon = outline.map((p) => this.#toCanvas(p));
+    const cx = polygon.reduce((sum, p) => sum + p.x, 0) / polygon.length;
+    const cy = polygon.reduce((sum, p) => sum + p.y, 0) / polygon.length;
+    const grown = polygon.map((p) => ({ x: cx + (p.x - cx) * 1.15, y: cy + (p.y - cy) * 1.15 }));
+    const count = this.#canvas.eraseInside(grown, { accumulate: sponge });
+    if (count) audio.play('erase');
+    if (sponge) return;
+    if (count) {
+      this.announce(count === 1 ? 'Trazo borrado.' : `${count} trazos borrados.`);
+    } else if (this.#canvas.strokeCount) {
+      this.announce('No hay ningún trazo bajo tu mano: pon la palma abierta encima del que quieras borrar.');
+    }
+  }
+
   /** @param {Event} event */
   #onProgress = (event) => {
     this.#indicator.progress = /** @type {CustomEvent} */ (event).detail.progress;
@@ -468,7 +555,7 @@ export class EstacionLanzamiento extends HTMLElement {
     const frame = /** @type {CustomEvent} */ (event).detail;
     if (frame.imageWidth && frame.imageWidth !== this.#imageSize.imageWidth) {
       this.#imageSize = { imageWidth: frame.imageWidth, imageHeight: frame.imageHeight };
-      this.#zone = calibrationToZone(settings.get('camera.calibration') ?? DEFAULT_CALIBRATION, this.#imageSize);
+      this.#zone = activeZone(settings.get('camera.calibration'), settings.get('camera.zoneSize'), this.#imageSize);
       this.#applyZone();
     }
     const gestures = this.#input.engine.getSnapshot().hands;
@@ -525,6 +612,7 @@ export class EstacionLanzamiento extends HTMLElement {
     const deviceId = settings.get('camera.deviceId');
     if (deviceId !== this.#camera.deviceId) this.#camera.deviceId = deviceId;
     this.#stageHands.hidden = !settings.get('hands.showOnCanvas');
+    this.#applyCorrection();
     this.#stageHands.variant = settings.get('hands.style');
     this.#spells.quality = settings.get('effects.quality');
     this.#input.engine.configure({
@@ -534,9 +622,28 @@ export class EstacionLanzamiento extends HTMLElement {
       smoothing: oneEuroFromSmoothing(settings.get('hands.smoothing')),
     });
     this.#input.setDetection(settings.get('hands.detection'));
-    const calibration = settings.get('camera.calibration') ?? DEFAULT_CALIBRATION;
-    if (!this.#calibrating) this.#zone = calibrationToZone(calibration, this.#imageSize);
+    if (!this.#calibrating) this.#zone = activeZone(settings.get('camera.calibration'), settings.get('camera.zoneSize'), this.#imageSize);
     this.#applyZone();
+  }
+
+  /**
+   * Corrección de los trazos: la intensidad elegida en Ajustes, limitada por
+   * el nivel (Aprendiz 100 %, Artesano 60 %, Maestro 30 %). Los trazos se
+   * ajustan a los símbolos del grimorio.
+   */
+  #applyCorrection() {
+    const level = settings.get('recognition.level');
+    const chosen = settings.get('drawing.correction');
+    const amount = effectiveCorrection(chosen, level);
+    this.#canvas.autoCorrect = amount > 0;
+    this.#canvas.correction = amount;
+    this.#canvas.templates = templatesFromGlyphs(glyphLibrary.list());
+    const label = { apprentice: 'Aprendiz', artisan: 'Artesano', master: 'Maestro' }[/** @type {'apprentice'} */ (level)];
+    const limited = chosen > CORRECTION_LIMITS[/** @type {'apprentice'} */ (level)];
+    /** @type {HTMLElement} */ (this.querySelector('.practice__correction')).textContent =
+      amount === 0
+        ? 'Corrección de los trazos: desactivada (Ajustes).'
+        : `Corrección de los trazos: ${Math.round(amount * 100)} %${limited ? ` (máximo del nivel ${label})` : ''}.`;
   }
 
   #updateHint() {
@@ -545,7 +652,9 @@ export class EstacionLanzamiento extends HTMLElement {
     hint.hidden = !empty || this.#input.mode === 'demo' || Boolean(this.#canvas.guide && this.#canvas.guideStyle !== 'none');
     hint.textContent =
       this.#defaultHint ||
-      (this.#input.mode === 'camera' ? 'Levanta el índice y traza en el aire' : 'Dibuja aquí con el ratón o el dedo, o activa la cámara');
+      (this.#input.mode === 'camera'
+        ? 'Levanta el índice y traza en el aire: más grande, más fuerte'
+        : 'Dibuja aquí con el ratón o el dedo, o activa la cámara');
   }
 
   /** @param {string} text */
@@ -562,9 +671,44 @@ export class EstacionLanzamiento extends HTMLElement {
 
   /** @param {KeyboardEvent} event */
   #onKey = (event) => {
-    if (event.target instanceof HTMLInputElement || event.ctrlKey || event.metaKey || event.altKey) return;
-    if (event.key === 'd' || event.key === 'D') this.#toggleStats();
-    if (event.key === 'r' || event.key === 'R') this.#toggleRecording();
+    const target = /** @type {HTMLElement} */ (event.target);
+    if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement) return;
+    if (target?.isContentEditable || event.altKey || event.metaKey || event.repeat) return;
+    const key = event.key.toLowerCase();
+    // Ctrl+Z también deshace, como en cualquier editor.
+    if (event.ctrlKey) {
+      if (key === 'z') {
+        event.preventDefault();
+        this.#canvas.undo();
+      }
+      return;
+    }
+    switch (key) {
+      case 's':
+        if (this.seal()) audio.play('seal');
+        break;
+      case 'z':
+        if (this.#canvas.undo()) this.announce('Último trazo deshecho.');
+        break;
+      case 'x':
+      case 'delete':
+        this.#canvas.clear().then((done) => done && this.announce('Lienzo borrado.'));
+        break;
+      case 'c':
+        /** @type {HTMLElement} */ (this.querySelector('.action-camera')).dispatchEvent(
+          new CustomEvent('rune-activate', { bubbles: true, composed: true }),
+        );
+        break;
+      case 'd':
+        this.#toggleStats();
+        break;
+      case 'r':
+        this.#toggleRecording();
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
   };
 
   #toggleStats() {
@@ -604,6 +748,8 @@ export class EstacionLanzamiento extends HTMLElement {
   #onCameraError = (event) => {
     const { reason, message } = /** @type {CustomEvent} */ (event).detail;
     this.#camera.hidden = true;
+    // Si no hay permiso o no hay cámara, no se vuelve a intentar al entrar.
+    if (['denied', 'notfound', 'insecure'].includes(reason)) settings.set('camera.enabled', false);
     this.#setStatus(message ?? CAMERA_ERROR_MESSAGES.unknown);
     this.#whisper()?.show({
       type: 'error',

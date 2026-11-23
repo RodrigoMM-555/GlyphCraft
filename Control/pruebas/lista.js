@@ -9,6 +9,7 @@ export const ARCHIVOS_DE_PRUEBAS = [
   // Biblioteca · lógica
   'glyphcraft-kit/nucleo/filtros/filtro-un-euro.prueba.js',
   'glyphcraft-kit/nucleo/geometria/trazo.prueba.js',
+  'glyphcraft-kit/nucleo/geometria/correccion.prueba.js',
   'glyphcraft-kit/nucleo/gestos/motor-gestos.prueba.js',
   'glyphcraft-kit/nucleo/gestos/rasgos-mano.prueba.js',
   'glyphcraft-kit/nucleo/glifos/modelo-glifo.prueba.js',

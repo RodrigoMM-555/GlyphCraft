@@ -1,5 +1,5 @@
 /**
- * Grimorio inicial: seis glifos originales.
+ * Grimorio inicial: nueve glifos originales.
  *
  * Todos comparten un círculo exterior que se traza desde arriba en sentido
  * horario. Las coordenadas están en el espacio del glifo (radio exterior 1,
@@ -119,4 +119,75 @@ export const STARTER_GLYPHS = [
     ],
     effect: { spell: 'ice' },
   },
+  {
+    id: 'fulgur',
+    name: 'Fulgur',
+    element: 'lightning',
+    difficulty: 2,
+    description: 'Descarga un relámpago que restalla dentro del círculo.',
+    lore: 'El rayo nunca baja recto: quiebra el cielo dos veces antes de tocar el suelo.',
+    strokes: [
+      OUTER,
+      { type: 'polyline', points: [[0.2, -0.66], [-0.24, 0.02], [0.24, -0.02], [-0.2, 0.66]] },
+    ],
+    strokeHints: [OUTER_HINT, 'Zigzag de un solo trazo, de arriba abajo, empezando por la derecha.'],
+    effect: { spell: 'lightning' },
+  },
+  {
+    id: 'terra',
+    name: 'Terra',
+    element: 'earth',
+    difficulty: 3,
+    description: 'Hace brotar del suelo columnas de roca.',
+    lore: 'La montaña y su raíz, unidas por la línea del horizonte.',
+    strokes: [
+      OUTER,
+      { type: 'polyline', points: [[0, -0.62], [0.62, 0], [0, 0.62], [-0.62, 0]], closed: true },
+      { type: 'line', from: [-0.62, 0], to: [0.62, 0] },
+    ],
+    strokeHints: [
+      OUTER_HINT,
+      'Rombo de un trazo, desde el vértice superior hacia la derecha.',
+      'Línea del horizonte, de izquierda a derecha.',
+    ],
+    effect: { spell: 'earth' },
+  },
+  {
+    id: 'umbra',
+    name: 'Umbra',
+    element: 'shadow',
+    difficulty: 3,
+    description: 'Abre un vórtice de sombra que devora la luz.',
+    lore: 'La luna menguante guarda la noche entre sus dos bordes.',
+    strokes: [OUTER, { type: 'polyline', points: crescent(), closed: true }],
+    strokeHints: [OUTER_HINT, 'Luna creciente de un trazo: desde la punta de arriba, borde exterior por la izquierda y vuelta por dentro.'],
+    effect: { spell: 'shadow' },
+  },
 ];
+
+/**
+ * Contorno de una luna creciente que mira a la derecha, como polilínea:
+ * borde exterior (por la izquierda) y borde interior de vuelta.
+ * @returns {[number, number][]}
+ */
+function crescent() {
+  /** @type {[number, number][]} */
+  const points = [];
+  const round = (/** @type {number} */ v) => Math.round(v * 1000) / 1000;
+  // Borde exterior: centro (0, 0), radio 0,62, de -60° a -300° (pasa por arriba, izquierda y abajo).
+  for (let i = 0; i <= 20; i++) {
+    const a = ((-60 - (240 * i) / 20) * Math.PI) / 180;
+    points.push([round(Math.cos(a) * 0.62), round(Math.sin(a) * 0.62)]);
+  }
+  // Borde interior: arco más plano que vuelve por dentro hasta la punta de arriba.
+  const [ex, ey] = points[points.length - 1];
+  const cx = 0.52;
+  const r = Math.hypot(ex - cx, ey);
+  const a0 = Math.atan2(ey, ex - cx);
+  const a1 = Math.atan2(-ey, ex - cx) + Math.PI * 2;
+  for (let i = 1; i < 14; i++) {
+    const a = a0 + ((a1 - a0) * i) / 14;
+    points.push([round(cx + Math.cos(a) * r), round(Math.sin(a) * r)]);
+  }
+  return points;
+}

@@ -162,7 +162,7 @@ describe('ReconocedorGlifos · niveles', () => {
 });
 
 describe('ReconocedorGlifos · classify', () => {
-  it('reconoce cada glifo entre los seis, con distintos dibujos', () => {
+  it('reconoce cada glifo entre todos los del grimorio, con distintos dibujos', () => {
     for (const glyph of glyphs) {
       for (let seed = 1; seed <= 5; seed++) {
         const strokes = drawGlyphLike(glyph, { wobble: 0.06, seed, cx: 0.45, r: 0.35 });

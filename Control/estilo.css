@@ -13,6 +13,8 @@
 html {
   color-scheme: dark;
   background: var(--gc-color-void);
+  /* Ajustes → Accesibilidad → Tamaño del texto (todo el diseño usa rem). */
+  font-size: calc(100% * var(--gc-text-scale, 1));
 }
 
 body {
@@ -437,7 +439,8 @@ kbd {
   --gc-glyph-ink: #5b3d1e;
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  /* Dos páginas iguales: el lomo (dibujado al 50 % del fondo) queda justo entre ellas. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   color: #2b2135;
   background:
     radial-gradient(ellipse at 50% 0%, rgb(255 255 255 / 0.35), transparent 60%),
@@ -447,6 +450,13 @@ kbd {
 }
 .book__page {
   padding: var(--gc-space-5) var(--gc-space-5);
+}
+/* Margen interior junto al lomo, como en un libro de verdad. */
+.book__page--left {
+  padding-inline-end: calc(var(--gc-space-5) + 1.25rem);
+}
+.book__page--right {
+  padding-inline-start: calc(var(--gc-space-5) + 1.25rem);
 }
 .book__heading {
   font-size: 1.3rem;
@@ -465,7 +475,9 @@ kbd {
   .book__page--right {
     block-size: 58rem;
   }
-  .book__page {
+  .book__page,
+  .book__page--left,
+  .book__page--right {
     padding: var(--gc-space-4) var(--gc-space-3);
   }
   .book__page--right {
@@ -480,12 +492,15 @@ kbd {
 /* Tamaño fijo: el libro no cambia de forma al pasar de un glifo a otro. */
 @media (min-width: 46.01rem) {
   .book {
-    block-size: 54rem;
+    block-size: 60rem;
   }
 }
 .book__page {
   min-block-size: 0;
   overflow: auto;
+  /* Si el índice no cabe, la barra de desplazamiento es discreta y del color del papel. */
+  scrollbar-width: thin;
+  scrollbar-color: rgb(91 61 30 / 0.35) transparent;
 }
 .page-leaf {
   position: absolute;
@@ -1019,4 +1034,236 @@ kbd {
 .menu__footer a {
   color: var(--gc-color-gold);
   text-decoration-color: color-mix(in oklab, var(--gc-color-gold) 40%, transparent);
+}
+
+/* ── Accesibilidad ──────────────────────────────────────────── */
+
+/* Oculto a la vista pero disponible para lectores de pantalla. */
+.visually-hidden {
+  position: absolute !important;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Enlace para saltar al contenido: aparece al recibir el foco con Tab. */
+.skip-link {
+  position: fixed;
+  z-index: 100;
+  inset-block-start: var(--gc-space-2);
+  inset-inline-start: var(--gc-space-2);
+  padding: var(--gc-space-2) var(--gc-space-3);
+  font: inherit;
+  font-family: var(--gc-font-display);
+  color: var(--gc-color-void);
+  background: var(--gc-color-gold);
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+  translate: 0 -200%;
+  transition: translate var(--gc-duration-fast);
+}
+.skip-link:focus-visible {
+  translate: 0 0;
+  outline: 2px solid var(--gc-color-ink);
+  outline-offset: 2px;
+}
+
+/* Foco siempre visible en los elementos nativos (los del kit traen el suyo). */
+a:focus-visible,
+summary:focus-visible,
+button:focus-visible,
+select:focus-visible,
+.app__outlet:focus-visible {
+  outline: 2px solid var(--gc-color-gold);
+  outline-offset: 3px;
+}
+.app__outlet:focus {
+  outline: none;
+}
+
+.link-button {
+  padding: 0;
+  font: inherit;
+  color: var(--gc-color-gold);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--gc-color-gold) 40%, transparent);
+  cursor: pointer;
+}
+
+/* Diálogo de ayuda */
+.help-dialog {
+  max-inline-size: min(34rem, calc(100% - 2rem));
+  padding: var(--gc-space-4);
+  color: var(--gc-color-ink);
+  background: var(--gc-color-night);
+  border: 1px solid color-mix(in oklab, var(--gc-color-gold) 45%, transparent);
+  box-shadow: 0 30px 60px rgb(0 0 0 / 0.6), var(--gc-glow-gold);
+}
+.help-dialog::backdrop {
+  background: rgb(7 6 15 / 0.7);
+  backdrop-filter: blur(3px);
+}
+.help-dialog h2 {
+  margin-block-end: var(--gc-space-3);
+  font-size: 1.3rem;
+  color: var(--gc-color-gold);
+}
+.help-dialog__list {
+  display: grid;
+  gap: var(--gc-space-2);
+  margin: 0;
+}
+.help-dialog__list div {
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  gap: var(--gc-space-3);
+}
+.help-dialog__list dd {
+  margin: 0;
+  color: var(--gc-color-muted);
+}
+.help-dialog__note {
+  font-size: 1rem;
+  font-style: italic;
+  color: var(--gc-color-muted);
+}
+.help-dialog form {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Alto contraste: textos secundarios más claros, bordes más marcados y
+   fondo animado atenuado. Se redefinen los tokens: el kit se adapta solo. */
+:root[data-contrast='high'] {
+  --gc-color-ink: #ffffff;
+  --gc-color-muted: #e2defa;
+  --gc-color-gold: #ffd98a;
+  --gc-color-azure: #9fd0ff;
+}
+:root[data-contrast='high'] .app__backdrop {
+  opacity: 0.35;
+}
+:root[data-contrast='high'] .book {
+  --gc-color-muted: #3d2f22;
+  --gc-color-gold: #6e2a08;
+}
+:root[data-contrast='high'] .view__intro,
+:root[data-contrast='high'] .practice__status,
+:root[data-contrast='high'] .stage__hint {
+  color: var(--gc-color-ink);
+}
+:root[data-contrast='high'] .stage__rings {
+  border-color: var(--gc-color-gold);
+}
+:root[data-contrast='high'] .cast-result,
+:root[data-contrast='high'] .lab-result,
+:root[data-contrast='high'] .settings fieldset {
+  background: rgb(7 6 15 / 0.92);
+  border-color: var(--gc-color-gold);
+}
+
+/* Movimiento reducido pedido en Ajustes (además de la preferencia del sistema). */
+:root[data-motion='reduce'] *,
+:root[data-motion='reduce'] *::before,
+:root[data-motion='reduce'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+:root[data-motion='reduce'] ::view-transition-group(*),
+:root[data-motion='reduce'] ::view-transition-old(*),
+:root[data-motion='reduce'] ::view-transition-new(*) {
+  animation: none !important;
+}
+
+/* ── Resultados: potencia y combinaciones ───────────────────── */
+
+.cast-result__power {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: var(--gc-font-display);
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gc-color-gold);
+}
+.cast-result__power[hidden] {
+  display: none;
+}
+.cast-result__power[data-level='high'] {
+  color: var(--gc-color-ember);
+  text-shadow: 0 0 12px rgb(255 138 76 / 0.6);
+}
+.cast-result__power[data-level='low'] {
+  color: var(--gc-color-muted);
+}
+.cast-combos {
+  margin-block-start: var(--gc-space-3);
+}
+.cast-combos summary {
+  cursor: pointer;
+  font-family: var(--gc-font-display);
+  letter-spacing: 0.08em;
+  color: var(--gc-color-ink);
+}
+.cast-combos ul {
+  margin: var(--gc-space-2) 0 0;
+  padding-inline-start: 1.1em;
+  display: grid;
+  gap: var(--gc-space-1);
+}
+.cast-combos strong {
+  font-weight: 600;
+  color: var(--gc-color-ember);
+}
+.lab-result__elements li.lab-result__power {
+  border-color: var(--gc-color-ember);
+  color: var(--gc-color-ember);
+}
+
+/* ── Ajustes: vista previa de la zona de trazado ─────────────── */
+
+.zone-preview {
+  display: grid;
+  place-items: center;
+  padding-block: var(--gc-space-1);
+}
+.zone-preview__frame {
+  position: relative;
+  inline-size: min(16rem, 100%);
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 60%, rgb(168 230 255 / 0.12), transparent 70%),
+    rgb(7 6 15 / 0.8);
+  border: 1px solid color-mix(in oklab, var(--gc-color-frost) 40%, transparent);
+}
+.zone-preview__zone {
+  position: absolute;
+  border: 2px solid var(--gc-color-gold);
+  background: rgb(232 198 117 / 0.12);
+  box-shadow: var(--gc-glow-gold);
+  transition: all var(--gc-duration-fast);
+}
+.field__help {
+  margin: 0;
+  font-size: 0.95rem;
+  font-style: italic;
+  color: var(--gc-color-muted);
+}
+
+.practice__correction {
+  margin: 0;
+  font-size: 0.95rem;
+  font-style: italic;
+  color: var(--gc-color-muted);
 }
