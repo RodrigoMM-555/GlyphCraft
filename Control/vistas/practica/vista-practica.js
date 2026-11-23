@@ -30,6 +30,15 @@ export class VistaPractica extends HTMLElement {
     this.#listeners = new AbortController();
     const { signal } = this.#listeners;
     this.#station.addEventListener('glyph-sealed', this.#onSealed, { signal });
+    // Estante: pulsar un glifo muestra su forma como guía sobre el círculo.
+    this.#station.shelf.addEventListener(
+      'glyph-pick',
+      (e) => {
+        const { glyphId, selected } = /** @type {CustomEvent} */ (e).detail;
+        this.#station.showReference(selected ? glyphLibrary.get(glyphId) : null);
+      },
+      { signal },
+    );
     progressStore.addEventListener('change', () => this.#renderKnown(), { signal });
     this.#renderKnown();
   }
@@ -49,6 +58,7 @@ export class VistaPractica extends HTMLElement {
       })}
       <gc-casting-station></gc-casting-station>`;
     this.#station = /** @type {EstacionLanzamiento} */ (this.querySelector('gc-casting-station'));
+    this.#station.shelf.innerHTML = '<gc-glyph-shelf mode="reference"></gc-glyph-shelf>';
     this.#station.extras.innerHTML = `
       <section class="cast-result" hidden aria-label="Resultado del lanzamiento">
         <gc-glyph class="cast-result__glyph" size="72"></gc-glyph>
@@ -73,20 +83,15 @@ export class VistaPractica extends HTMLElement {
         <gc-rune-button rune="grimoire" size="sm" data-nav="/grimoire">Abrir el grimorio</gc-rune-button>`;
       return;
     }
-    known.innerHTML = `<p class="kicker">Glifos que dominas</p><ul class="cast-known__list"></ul>`;
-    const list = /** @type {HTMLElement} */ (known.querySelector('ul'));
-    for (const glyph of learned) {
-      const li = document.createElement('li');
-      li.innerHTML = '<gc-glyph size="34"></gc-glyph><span></span>';
-      /** @type {GcGlifo} */ (li.querySelector('gc-glyph')).glyphId = glyph.id;
-      /** @type {HTMLElement} */ (li.querySelector('span')).textContent = glyph.name;
-      list.append(li);
-    }
-
+    // Los glifos (y su forma) están en el estante de la izquierda; aquí, las combinaciones.
+    known.replaceChildren();
     // Combinaciones con nombre que ya se pueden lanzar (todos sus glifos aprendidos).
     const learnedIds = new Set(learned.map((g) => g.id));
     const combos = Object.entries(NAMED_COMBINATIONS).filter(([id]) => id.split('+').every((g) => learnedIds.has(g)));
-    if (!combos.length) return;
+    if (!combos.length) {
+      known.innerHTML = '<p>Combina dos glifos aprendidos en el mismo círculo para lanzar un hechizo combinado.</p>';
+      return;
+    }
     const details = document.createElement('details');
     details.className = 'cast-combos';
     details.innerHTML = `<summary>Combinaciones disponibles (${combos.length})</summary><ul></ul>`;

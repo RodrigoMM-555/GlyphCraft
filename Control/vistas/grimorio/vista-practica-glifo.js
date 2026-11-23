@@ -20,6 +20,10 @@ const GUIDE_PLACEMENT = { cx: 0.5, cy: 0.5, r: 0.42 };
  * Muestra la guía según el nivel, evalúa cada glifo sellado, colorea los
  * trazos, explica qué mejorar y lleva la cuenta de los aciertos hasta que
  * el glifo queda aprendido.
+ *
+ * A la izquierda, un estante con todos los glifos permite cambiar de glifo
+ * sin volver al grimorio: la vista implementa `updateRoute(params)` y el
+ * contenedor de la app la actualiza en el sitio (la cámara sigue encendida).
  */
 export class VistaPracticaGlifo extends HTMLElement {
   /** @type {Record<string, string>} */
@@ -46,12 +50,41 @@ export class VistaPracticaGlifo extends HTMLElement {
     const { signal } = this.#listeners;
     this.#station.addEventListener('glyph-sealed', this.#onSealed, { signal });
     this.addEventListener('rune-activate', this.#onAction, { signal });
+    this.#station.shelf.addEventListener(
+      'glyph-pick',
+      (e) => {
+        const { glyphId } = /** @type {CustomEvent} */ (e).detail;
+        this.dispatchEvent(new CustomEvent('navigate', { detail: { path: `/grimoire/${glyphId}/practice` }, bubbles: true }));
+      },
+      { signal },
+    );
     this.#applyLevel();
     this.#refreshSeals();
   }
 
   disconnectedCallback() {
     this.#listeners?.abort();
+  }
+
+  /**
+   * Llamado por el contenedor de la app al cambiar de glifo dentro de la
+   * práctica guiada: se cambia en el sitio, sin recrear la vista.
+   * @param {Record<string, string>} params
+   * @returns {boolean} `false` si hay que recrear la vista (glifo inexistente).
+   */
+  updateRoute(params) {
+    const glyph = glyphLibrary.get(params?.glyphId ?? '');
+    if (!glyph || !this.#glyph) return false;
+    this.#params = params;
+    if (glyph === this.#glyph) return true;
+    this.#glyph = glyph;
+    this.#station.clear({ animated: false });
+    this.#station.setFeedback([]);
+    this.#showGlyph(glyph);
+    this.#applyLevel();
+    this.#refreshSeals();
+    this.#station.announce(`Practicando ${glyph.name}.`);
+    return true;
   }
 
   #render() {
@@ -74,11 +107,9 @@ export class VistaPracticaGlifo extends HTMLElement {
         back: { path: `/grimoire/${glyph.id}`, label: 'Grimorio' },
       })}
       <gc-casting-station></gc-casting-station>`;
-    /** @type {HTMLElement} */ (this.querySelector('.view__title')).textContent = glyph.name;
-    /** @type {HTMLElement} */ (this.querySelector('.view__intro')).textContent =
-      `${glyph.description ?? ''} Sigue la guía, traza el glifo y séllalo. ${CASTS_TO_LEARN} aciertos y quedará aprendido.`;
 
     this.#station = /** @type {EstacionLanzamiento} */ (this.querySelector('gc-casting-station'));
+    this.#station.shelf.innerHTML = '<gc-glyph-shelf mode="navigate"></gc-glyph-shelf>';
     this.#station.extras.innerHTML = `
       <div class="levels" role="group" aria-label="Nivel de exigencia">
         ${Object.entries(RECOGNITION_LEVELS)
@@ -98,7 +129,23 @@ export class VistaPracticaGlifo extends HTMLElement {
         <p class="evaluation__summary"></p>
         <ul class="evaluation__issues"></ul>
       </div>`;
+    this.#showGlyph(glyph);
+  }
+
+  /**
+   * Textos, modelo y estante del glifo que se practica.
+   * @param {Glyph} glyph
+   */
+  #showGlyph(glyph) {
+    /** @type {HTMLElement} */ (this.querySelector('.view__title')).textContent = glyph.name;
+    /** @type {HTMLElement} */ (this.querySelector('.view__intro')).textContent =
+      `${glyph.description ?? ''} Sigue la guía, traza el glifo y séllalo. ${CASTS_TO_LEARN} aciertos y quedará aprendido.`;
+    /** @type {HTMLElement} */ (this.querySelector('.view__back')).dataset.nav = `/grimoire/${glyph.id}`;
     /** @type {GcGlifo} */ (this.querySelector('.model__glyph')).glyph = glyph;
+    /** @type {any} */ (this.querySelector('gc-glyph-shelf')).current = glyph.id;
+    /** @type {HTMLElement} */ (this.querySelector('.evaluation__summary')).textContent = '';
+    /** @type {HTMLElement} */ (this.querySelector('.evaluation__issues')).replaceChildren();
+    /** @type {GcMedidorArcano} */ (this.querySelector('.scores__precision')).value = 0;
   }
 
   /** Guía, umbral y botones según el nivel elegido. */

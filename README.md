@@ -75,6 +75,11 @@ el botón o con <kbd>S</kbd>.
   con guía y queda **aprendido tras 3 aciertos**; **dominado** tras 3 en nivel
   Maestro. Niveles: Aprendiz (orden libre, 60 puntos), Artesano (orden y número
   de trazos, 75) y Maestro (orden y sentido, 85).
+- **Estante de glifos** (columna izquierda): en «Practicar magia» y el
+  Laboratorio muestra en pequeño los glifos que hayas practicado al menos una
+  vez; al pulsar uno se ve su trazado y su forma como guía en el círculo. En
+  la práctica guiada muestra todos y permite **cambiar de glifo sin volver al
+  grimorio** (la cámara sigue encendida).
 - **Practicar magia**: se traza de memoria; el círculo reconoce el glifo y, si
   está aprendido, lanza su hechizo en 3D. También se pueden lanzar
   **combinaciones** de glifos aprendidos dentro del mismo círculo.
@@ -140,7 +145,7 @@ estilo.css                 Estilos de la aplicación
 nucleo/                    Aplicación (mediador), enrutador y rutas
 servicios/                 Ajustes, progreso, logros, hechizos (potencia y combinaciones),
                            accesibilidad, sonido, calibración, copia de seguridad
-vistas/                    Menú, práctica, grimorio, laboratorio, progreso, ajustes
+vistas/                    Menú, práctica (y estante de glifos), grimorio, laboratorio, progreso, ajustes
 catalogo/                  Lógica y estilos de catalogo.html
 glyphcraft-kit/            Biblioteca reutilizable (ver su README)
   componentes/             13 Web Components, cada uno con sus pruebas

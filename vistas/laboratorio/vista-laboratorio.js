@@ -26,6 +26,15 @@ export class VistaLaboratorio extends HTMLElement {
     this.#listeners = new AbortController();
     const { signal } = this.#listeners;
     this.#station.addEventListener('glyph-sealed', this.#onSealed, { signal });
+    // Estante: pulsar un glifo muestra su forma como guía sobre el círculo.
+    this.#station.shelf.addEventListener(
+      'glyph-pick',
+      (e) => {
+        const { glyphId, selected } = /** @type {CustomEvent} */ (e).detail;
+        this.#station.showReference(selected ? glyphLibrary.get(glyphId) : null);
+      },
+      { signal },
+    );
     progressStore.addEventListener('change', () => this.#renderDiscoveries(), { signal });
     this.#renderDiscoveries();
   }
@@ -45,6 +54,7 @@ export class VistaLaboratorio extends HTMLElement {
       })}
       <gc-casting-station></gc-casting-station>`;
     this.#station = /** @type {EstacionLanzamiento} */ (this.querySelector('gc-casting-station'));
+    this.#station.shelf.innerHTML = '<gc-glyph-shelf mode="reference"></gc-glyph-shelf>';
     this.#station.setHint('Traza el círculo y combina símbolos dentro');
     this.#station.extras.innerHTML = `
       <section class="lab-result" hidden aria-label="Resultado del experimento">

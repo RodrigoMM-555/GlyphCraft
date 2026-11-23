@@ -17,6 +17,7 @@ import { settings } from './servicios/servicios-app.js';
 import { startAccessibility } from './servicios/accesibilidad.js';
 import { VistaMenu } from './vistas/menu/vista-menu.js';
 import { EstacionLanzamiento } from './vistas/practica/estacion-lanzamiento.js';
+import { EstanteGlifos } from './vistas/practica/estante-glifos.js';
 import { VistaPractica } from './vistas/practica/vista-practica.js';
 import { VistaGrimorio } from './vistas/grimorio/vista-grimorio.js';
 import { VistaPracticaGlifo } from './vistas/grimorio/vista-practica-glifo.js';
@@ -31,6 +32,7 @@ startAccessibility(settings);
 // El catálogo de glifos (datos) se registra antes de crear ninguna vista.
 glyphLibrary.add(...STARTER_GLYPHS);
 
+customElements.define('gc-glyph-shelf', EstanteGlifos);
 customElements.define('gc-casting-station', EstacionLanzamiento);
 customElements.define('gc-view-menu', VistaMenu);
 customElements.define('gc-view-practice', VistaPractica);

@@ -256,9 +256,21 @@ kbd {
 
 .practice {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(16rem, 20rem);
-  gap: var(--gc-space-5);
+  /* Estante de glifos · círculo · panel de controles */
+  grid-template-columns: minmax(8.5rem, 10.5rem) minmax(0, 1fr) minmax(16rem, 20rem);
+  gap: var(--gc-space-4);
   align-items: start;
+}
+/* Si la vista no usa estante, el círculo ocupa su sitio. */
+.practice:has(.practice__shelf:empty) {
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 20rem);
+}
+.practice__shelf:empty {
+  display: none;
+}
+/* Las vistas con círculo de práctica son algo más anchas para las tres columnas. */
+.view--practice {
+  inline-size: min(84rem, 100%);
 }
 
 /* El escenario es cuadrado: así un círculo trazado en el aire es un círculo. */
@@ -418,7 +430,8 @@ kbd {
 }
 
 @media (max-width: 56rem) {
-  .practice {
+  .practice,
+  .practice:has(.practice__shelf:empty) {
     grid-template-columns: 1fr;
   }
   .stage {
@@ -1266,4 +1279,105 @@ select:focus-visible,
   font-size: 0.95rem;
   font-style: italic;
   color: var(--gc-color-muted);
+}
+
+/* ── Estante de glifos (práctica, laboratorio y práctica guiada) ── */
+
+.practice__shelf {
+  position: sticky;
+  inset-block-start: var(--gc-space-3);
+}
+.shelf {
+  display: block;
+  padding: var(--gc-space-3) var(--gc-space-2);
+  border: 1px solid color-mix(in oklab, var(--gc-color-gold) 22%, transparent);
+  background: rgb(14 12 31 / 0.55);
+}
+.shelf__title {
+  margin: 0 0 var(--gc-space-1);
+  padding-inline: var(--gc-space-1);
+  font-size: 0.9rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gc-color-gold);
+}
+.shelf__hint,
+.shelf__empty {
+  margin: 0 0 var(--gc-space-2);
+  padding-inline: var(--gc-space-1);
+  font-size: 0.85rem;
+  font-style: italic;
+  line-height: 1.3;
+  color: var(--gc-color-muted);
+}
+.shelf__empty a {
+  color: var(--gc-color-gold);
+}
+.shelf__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  max-block-size: 62dvh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(232 198 117 / 0.3) transparent;
+}
+.shelf__item {
+  inline-size: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--gc-space-2);
+  padding: var(--gc-space-1);
+  font: inherit;
+  font-family: var(--gc-font-display);
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  text-align: start;
+  color: var(--gc-color-ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  --gc-glyph-ink: var(--gc-color-gold);
+  transition: background var(--gc-duration-fast), border-color var(--gc-duration-fast);
+}
+.shelf__item:hover {
+  background: rgb(232 198 117 / 0.08);
+}
+.shelf__item.is-current {
+  border-color: color-mix(in oklab, var(--gc-color-gold) 65%, transparent);
+  background: rgb(232 198 117 / 0.12);
+  box-shadow: var(--gc-glow-gold);
+}
+.shelf__status {
+  color: var(--gc-color-gold);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 56rem) {
+  .practice__shelf {
+    position: static;
+  }
+  .shelf__hint {
+    display: none;
+  }
+  .shelf__list {
+    display: flex;
+    gap: var(--gc-space-1);
+    max-block-size: none;
+    overflow-x: auto;
+    padding-block-end: var(--gc-space-1);
+  }
+  .shelf__item {
+    inline-size: auto;
+    grid-template-columns: auto;
+    justify-items: center;
+    gap: 2px;
+  }
+  .shelf__status {
+    display: none;
+  }
 }

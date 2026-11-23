@@ -1,5 +1,5 @@
 import { CAMERA_ERROR_MESSAGES } from 'glyphcraft-kit';
-import { glyphLibrary, templatesFromGlyphs } from 'glyphcraft-kit/nucleo';
+import { glyphLibrary, templatesFromGlyphs, placeGlyph } from 'glyphcraft-kit/nucleo';
 import { effectiveCorrection, CORRECTION_LIMITS } from '../../servicios/ajustes.js';
 import { EntradaMano } from '../../servicios/entrada-mano.js';
 import { activeZone, calibrationToZone, calibrationFromPath, mapToCanvas } from '../../servicios/calibracion.js';
@@ -50,6 +50,8 @@ const loadEffects = () => (effectsModule ??= import('glyphcraft-kit/efectos').ca
  *
  * API para las vistas que lo usan:
  * - `extras`: contenedor del panel donde la vista añade su propia interfaz.
+ * - `shelf`: columna izquierda donde la vista coloca su estante de glifos.
+ * - `showReference(glyph)`: muestra (o quita, con `null`) la forma de un glifo como guía tenue.
  * - `setGuide(strokes, options)`, `setFeedback(grades)`, `clear()`, `strokes`.
  * - `activate(glyph, transform)`: animación de activación sobre lo dibujado.
  * - `announce(text)`: mensaje de estado (región viva) que también se lee en voz alta si se ha pedido.
@@ -88,6 +90,7 @@ export class EstacionLanzamiento extends HTMLElement {
   /** @type {HTMLElement} */ #status = /** @type {any} */ (null);
   /** @type {HTMLElement} */ #stats = /** @type {any} */ (null);
   /** @type {HTMLElement} */ #extras = /** @type {any} */ (null);
+  /** @type {HTMLElement} */ #shelf = /** @type {any} */ (null);
 
   connectedCallback() {
     // Los hijos se crean al conectarse: un custom element no puede crearlos en su constructor.
@@ -160,6 +163,21 @@ export class EstacionLanzamiento extends HTMLElement {
   /** Contenedor del panel para la interfaz propia de cada vista. */
   get extras() {
     return this.#extras;
+  }
+
+  /** Columna izquierda para el estante de glifos de cada vista. */
+  get shelf() {
+    return this.#shelf;
+  }
+
+  /**
+   * Muestra la forma de un glifo como guía tenue sobre el círculo, para
+   * recordar cómo se dibuja (o la quita con `null`).
+   * @param {Glyph | null} glyph
+   */
+  showReference(glyph) {
+    this.setGuide(glyph ? placeGlyph(glyph, { cx: 0.5, cy: 0.5, r: 0.42 }) : null, { style: 'ghost' });
+    this.#updateHint();
   }
 
   /** Trazos dibujados (copia). */
@@ -299,6 +317,8 @@ export class EstacionLanzamiento extends HTMLElement {
   #render() {
     this.className = 'practice';
     this.innerHTML = `
+      <div class="practice__shelf"></div>
+
       <div class="stage">
         <div class="stage__rings" aria-hidden="true"></div>
         <gc-glyph-canvas class="stage__canvas" pointer-input line-width="5" auto-correct aria-describedby="stage-help"></gc-glyph-canvas>
@@ -367,6 +387,7 @@ export class EstacionLanzamiento extends HTMLElement {
     this.#status = $('.practice__status');
     this.#stats = $('.practice__stats');
     this.#extras = $('.practice__extras');
+    this.#shelf = $('.practice__shelf');
 
     for (const toggle of this.querySelectorAll('gc-rune-toggle[data-setting]')) {
       toggle.addEventListener('change', (e) => {
